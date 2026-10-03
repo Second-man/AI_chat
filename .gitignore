@@ -13,6 +13,7 @@ dist-ssr
 *.local
 .echomate/
 backend/__pycache__/
+backend/**/__pycache__/
 
 # Editor directories and files
 .vscode/*
