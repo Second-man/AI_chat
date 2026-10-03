@@ -4,6 +4,9 @@ import hashlib
 import io
 import os
 import sqlite3
+import base64
+import getpass
+import platform
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +15,7 @@ from typing import Annotated
 import chromadb
 import keyring
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from cryptography.fernet import Fernet, InvalidToken
 from docx import Document
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,10 +37,51 @@ except PermissionError:
 DB_PATH = DATA_DIR / "echomate.db"
 CHROMA_DIR = DATA_DIR / "chroma"
 KEYRING_SERVICE = "EchoMate"
+VAULT_FILE = DATA_DIR / "api_key.vault"
+VAULT_SALT_FILE = DATA_DIR / "api_key.vault.salt"
 
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def vault_key() -> bytes:
+    """A per-user, per-machine encryption key used only if Windows Credential Manager is unavailable."""
+    if VAULT_SALT_FILE.exists():
+        salt = VAULT_SALT_FILE.read_bytes()
+    else:
+        salt = os.urandom(32)
+        VAULT_SALT_FILE.write_bytes(salt)
+    material = f"{APP_NAME}|{getpass.getuser()}|{platform.node()}".encode() + salt
+    return base64.urlsafe_b64encode(hashlib.sha256(material).digest())
+
+
+def read_api_key() -> tuple[str | None, str | None]:
+    try:
+        secret = keyring.get_password(KEYRING_SERVICE, "api_key")
+        if secret:
+            return secret, "Windows 凭据管理器"
+    except Exception:
+        # Some restricted Windows sessions cannot call CredRead/CredWrite.
+        pass
+    if not VAULT_FILE.exists():
+        return None, None
+    try:
+        return Fernet(vault_key()).decrypt(VAULT_FILE.read_bytes()).decode(), "本机加密保险库"
+    except (InvalidToken, OSError, ValueError):
+        return None, None
+
+
+def save_api_key(secret: str) -> str:
+    """Prefer Windows Credential Manager; never fall back to plaintext or SQLite."""
+    try:
+        keyring.set_password(KEYRING_SERVICE, "api_key", secret)
+        if VAULT_FILE.exists():
+            VAULT_FILE.unlink()
+        return "Windows 凭据管理器"
+    except Exception:
+        VAULT_FILE.write_bytes(Fernet(vault_key()).encrypt(secret.encode()))
+        return "本机加密保险库"
 
 
 @contextmanager
@@ -159,7 +204,8 @@ def health():
 
 @app.get("/settings")
 def get_settings():
-    return {**settings(), "api_key_configured": bool(keyring.get_password(KEYRING_SERVICE, "api_key"))}
+    _, storage = read_api_key()
+    return {**settings(), "api_key_configured": bool(storage), "api_key_storage": storage}
 
 
 @app.put("/settings")
@@ -169,7 +215,7 @@ def update_settings(payload: SettingsPayload):
     with db() as connection:
         connection.execute("UPDATE settings SET base_url=?, chat_model=?, embedding_model=?, updated_at=? WHERE id=1", (payload.base_url.rstrip("/"), payload.chat_model, payload.embedding_model, now()))
     if payload.api_key.strip():
-        keyring.set_password(KEYRING_SERVICE, "api_key", payload.api_key.strip())
+        save_api_key(payload.api_key.strip())
     return get_settings()
 
 
@@ -226,7 +272,7 @@ async def import_document(file: Annotated[UploadFile, File(...)]):
 
 @app.post("/analyze")
 def analyze(payload: AnalyzePayload):
-    api_key = keyring.get_password(KEYRING_SERVICE, "api_key")
+    api_key, _ = read_api_key()
     if not api_key:
         raise HTTPException(400, "请先在设置中保存 API Key")
     contact = rows("SELECT name, relationship, notes FROM contacts WHERE id=?", (payload.contact_id,))
