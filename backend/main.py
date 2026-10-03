@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import re
 import sqlite3
 import base64
 import getpass
@@ -17,7 +18,7 @@ import keyring
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from cryptography.fernet import Fernet, InvalidToken
 from docx import Document
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -118,6 +119,12 @@ def initialize_database() -> None:
               id INTEGER PRIMARY KEY AUTOINCREMENT, contact_id INTEGER NOT NULL, prompt TEXT NOT NULL, response TEXT NOT NULL, citations TEXT NOT NULL, created_at TEXT NOT NULL,
               FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS chat_imports (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, contact_id INTEGER NOT NULL,
+              file_name TEXT NOT NULL, content_hash TEXT NOT NULL, message_count INTEGER NOT NULL,
+              created_at TEXT NOT NULL, UNIQUE(contact_id, content_hash),
+              FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+            );
             """
         )
 
@@ -146,6 +153,27 @@ def extract_text(file_name: str, content: bytes) -> str:
     if suffix == ".docx":
         return "\n".join(paragraph.text for paragraph in Document(io.BytesIO(content)).paragraphs)
     raise HTTPException(415, "仅支持 TXT、Markdown、PDF 和 DOCX 文件")
+
+
+def parse_chat_text(text: str, default_role: str) -> list[tuple[str, str]]:
+    """Parse a user-exported text transcript without accessing any chat application."""
+    messages: list[tuple[str, str]] = []
+    role_prefix = re.compile(r"^\s*(我|对方|TA|Ta|ta|Me|me)\s*[:：]\s*(.+)$")
+    for raw_line in text.replace("\r\n", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = role_prefix.match(line)
+        if match:
+            speaker, content = match.groups()
+            role = "sent" if speaker.lower() in {"我", "me"} else "received"
+            messages.append((role, content.strip()))
+        elif messages:
+            role, content = messages[-1]
+            messages[-1] = (role, f"{content}\n{line}")
+        else:
+            messages.append((default_role, line))
+    return [(role, content) for role, content in messages if content]
 
 
 class SettingsPayload(BaseModel):
@@ -243,6 +271,41 @@ def save_message(payload: MessagePayload):
     with db() as connection:
         cursor = connection.execute("INSERT INTO messages(contact_id, role, content, source, created_at) VALUES (?, ?, ?, ?, ?)", (payload.contact_id, payload.role, payload.content.strip(), payload.source, now()))
         return dict(connection.execute("SELECT * FROM messages WHERE id=?", (cursor.lastrowid,)).fetchone())
+
+
+@app.post("/contacts/{contact_id}/messages/import")
+async def import_chat_messages(
+    contact_id: int,
+    file: Annotated[UploadFile, File(...)],
+    source: Annotated[str, Form()] = "导入文本",
+    default_role: Annotated[str, Form()] = "received",
+):
+    if default_role not in {"received", "sent"}:
+        raise HTTPException(400, "默认说话人只能是我或对方")
+    if not rows("SELECT id FROM contacts WHERE id=?", (contact_id,)):
+        raise HTTPException(404, "未找到联系人")
+    if Path(file.filename or "").suffix.lower() not in {".txt", ".md"}:
+        raise HTTPException(415, "聊天记录导入仅支持 TXT 或 Markdown 文本")
+    content = await file.read()
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(413, "文件超过 20MB 限制")
+    digest = hashlib.sha256(content).hexdigest()
+    parsed = parse_chat_text(content.decode("utf-8-sig", errors="replace"), default_role)
+    if not parsed:
+        raise HTTPException(400, "没有识别到可导入的聊天文本")
+    with db() as connection:
+        duplicate = connection.execute("SELECT id, message_count FROM chat_imports WHERE contact_id=? AND content_hash=?", (contact_id, digest)).fetchone()
+        if duplicate:
+            return {"id": duplicate["id"], "duplicate": True, "messages": duplicate["message_count"]}
+        cursor = connection.execute(
+            "INSERT INTO chat_imports(contact_id, file_name, content_hash, message_count, created_at) VALUES (?, ?, ?, ?, ?)",
+            (contact_id, file.filename or "chat.txt", digest, len(parsed), now()),
+        )
+        connection.executemany(
+            "INSERT INTO messages(contact_id, role, content, source, created_at) VALUES (?, ?, ?, ?, ?)",
+            [(contact_id, role, message, source[:80], now()) for role, message in parsed],
+        )
+    return {"id": cursor.lastrowid, "file_name": file.filename, "messages": len(parsed), "duplicate": False}
 
 
 @app.post("/documents/import")

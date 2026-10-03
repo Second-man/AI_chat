@@ -98,6 +98,21 @@ function App() {
     } catch (error) { setStatus(error instanceof Error ? error.message : '导入失败') } finally { setBusy(false) }
   }
 
+  const importChatHistory = async (file?: File) => {
+    if (!file) return
+    if (!selected) return setShowContact(true)
+    const data = new FormData()
+    data.append('file', file)
+    data.append('source', source === '手动粘贴' ? '导入文本' : source)
+    data.append('default_role', 'received')
+    try {
+      setBusy(true)
+      const result = await request<{ file_name: string; messages: number; duplicate: boolean }>(`/contacts/${selected}/messages/import`, { method: 'POST', body: data })
+      await loadMessages(selected)
+      setStatus(result.duplicate ? '这份聊天记录已导入过，无需重复保存' : `已将 ${result.file_name} 的 ${result.messages} 条消息保存到本机`)
+    } catch (error) { setStatus(error instanceof Error ? error.message : '聊天记录导入失败') } finally { setBusy(false) }
+  }
+
   const captureClipboard = async () => {
     try { setText(await navigator.clipboard.readText()); setSource('剪贴板（用户触发）') } catch { setStatus('无法读取剪贴板，请直接粘贴内容') }
   }
@@ -131,7 +146,7 @@ function App() {
           <div className="contact-tabs">{contacts.map((contact) => <button className={contact.id === selected ? 'chosen' : ''} onClick={() => setSelected(contact.id)} key={contact.id}>{contact.name}</button>)}</div>
           <div className="thread">{messages.length ? messages.map((message) => <div className={`message ${message.role}`} key={message.id}>{message.content}<small>{message.source}</small></div>) : <div className="empty-thread">主动粘贴你有权处理的聊天片段，或从微信/QQ 导出的文本文件导入。应用不会读取它们的私有数据库。</div>}</div>
           <label className="composer-label" htmlFor="message">需要回应的内容</label><textarea id="message" value={text} onChange={(event) => setText(event.target.value)} placeholder="粘贴对方刚发来的内容…" />
-          <div className="composer-footer"><div><select value={source} onChange={(event) => setSource(event.target.value)}><option>手动粘贴</option><option>微信导出文本</option><option>QQ 导出文本</option><option>剪贴板（用户触发）</option></select><button className="clipboard" onClick={captureClipboard}>读取剪贴板</button></div><button className="analyze-button" onClick={prepareAnalysis} disabled={busy}>{busy ? '处理中…' : '查看发送预览 ↗'}</button></div>
+          <div className="composer-footer"><div><select value={source} onChange={(event) => setSource(event.target.value)}><option>手动粘贴</option><option>微信导出文本</option><option>QQ 导出文本</option><option>剪贴板（用户触发）</option></select><button className="clipboard" onClick={captureClipboard}>读取剪贴板</button><label className="history-import">导入聊天 TXT<input type="file" accept=".txt,.md" onChange={(event) => importChatHistory(event.target.files?.[0])} /></label></div><button className="analyze-button" onClick={prepareAnalysis} disabled={busy}>{busy ? '处理中…' : '查看发送预览 ↗'}</button></div>
         </section>
         <aside className="insight-panel"><div className="panel-heading"><div><p className="eyebrow">本地分析</p><h2>{analysis ? '沟通线索与草案' : '先由你决定要发送什么'}</h2></div><span className="confidence">非心理诊断</span></div>{analysis ? <><article className="answer">{analysis.answer}</article><div className="references"><h3>检索到的本地参考资料</h3>{analysis.citations.length ? analysis.citations.map((citation, index) => <p key={index}><b>{citation.file_name}</b>{citation.excerpt}</p>) : <p>本次没有使用知识库片段。</p>}</div></> : <><p className="insight-copy">建立联系人后，导入聊天指南或自己的参考资料。系统会在本机分块、向量化并检索；只有你确认时才发送必要上下文给模型。</p><ol className="workflow"><li>导入聊天指南 / TXT / PDF / DOCX</li><li>粘贴当前消息并选择联系人</li><li>检查发送预览，再请求建议</li></ol></>}<div className="data-note">不会自动读取微信、QQ 窗口，不会代替你发送消息。</div></aside>
       </div>

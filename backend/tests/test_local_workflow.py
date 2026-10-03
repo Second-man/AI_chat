@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 
 
@@ -30,7 +31,7 @@ class LocalWorkflowTests(unittest.TestCase):
 
     def setUp(self) -> None:
         with self.app.db() as connection:
-            for table in ("analyses", "messages", "contacts", "documents"):
+            for table in ("analyses", "chat_imports", "messages", "contacts", "documents"):
                 connection.execute(f"DELETE FROM {table}")
 
     def test_settings_fall_back_to_an_encrypted_local_vault(self) -> None:
@@ -79,6 +80,25 @@ class LocalWorkflowTests(unittest.TestCase):
         chunks = self.app.RecursiveCharacterTextSplitter(chunk_size=120, chunk_overlap=20).split_text(text)
         self.assertGreater(len(chunks), 1)
         self.assertTrue(all(len(chunk) <= 120 for chunk in chunks))
+
+    def test_exported_chat_text_is_imported_once_with_roles(self) -> None:
+        import asyncio
+        from starlette.datastructures import UploadFile
+
+        contact = self.app.create_contact(self.app.ContactPayload(name="导入联系人"))
+        exported = "对方：周末有空吗？\n我：周日下午可以。\n对方：那就这样定。".encode()
+
+        def upload() -> UploadFile:
+            return UploadFile(filename="wechat-export.txt", file=BytesIO(exported))
+
+        result = asyncio.run(self.app.import_chat_messages(contact["id"], upload(), "微信导出文本", "received"))
+        self.assertFalse(result["duplicate"])
+        self.assertEqual(result["messages"], 3)
+        messages = self.app.list_messages(contact["id"])
+        self.assertEqual([message["role"] for message in messages], ["received", "sent", "received"])
+        duplicate = asyncio.run(self.app.import_chat_messages(contact["id"], upload(), "微信导出文本", "received"))
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(len(self.app.list_messages(contact["id"])), 3)
 
 
 if __name__ == "__main__":
