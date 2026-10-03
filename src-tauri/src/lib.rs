@@ -14,14 +14,23 @@ fn project_root() -> PathBuf {
 
 fn start_local_api(app: &tauri::AppHandle) {
   let root = project_root();
-  let python = env::var("ECHOMATE_PYTHON").unwrap_or_else(|_| {
-    let bundled = root.join(".venv").join("python.exe");
-    if bundled.exists() { bundled.to_string_lossy().to_string() } else { "python".to_string() }
-  });
-  match Command::new(python)
-    .current_dir(&root)
-    .env("ECHOMATE_DATA_DIR", root.join(".echomate"))
-    .args(["backend/main.py"])
+  let (program, arguments, working_dir, data_dir) = if cfg!(debug_assertions) {
+    let python = env::var("ECHOMATE_PYTHON").unwrap_or_else(|_| {
+      let bundled = root.join(".venv").join("python.exe");
+      if bundled.exists() { bundled.to_string_lossy().to_string() } else { "python".to_string() }
+    });
+    (PathBuf::from(python), vec!["backend/main.py".to_string()], root.clone(), root.join(".echomate"))
+  } else {
+    let data_dir = app.path().app_local_data_dir().unwrap_or_else(|_| root.join(".echomate"));
+    let executable = app.path().resource_dir()
+      .unwrap_or_else(|_| root.join("resources"))
+      .join("resources").join("echomate-api").join("echomate-api.exe");
+    (executable, Vec::new(), data_dir.clone(), data_dir)
+  };
+  match Command::new(program)
+    .current_dir(working_dir)
+    .env("ECHOMATE_DATA_DIR", data_dir)
+    .args(arguments)
     .spawn() {
       Ok(child) => {
         if let Ok(mut process) = app.state::<LocalApiProcess>().0.lock() {

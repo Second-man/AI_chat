@@ -10,3 +10,4 @@ python-docx
 keyring
 cryptography
 python-multipart
+pyinstaller
