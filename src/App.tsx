@@ -1,86 +1,140 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import './App.css'
 
-type DraftTone = '自然' | '温和' | '简洁'
+const API = 'http://127.0.0.1:8787'
 
-const suggestions: Record<DraftTone, string> = {
-  自然: '听起来你这两天真的挺忙的。别急着回复，等你缓过来我们再好好聊。',
-  温和: '感觉你最近承担了不少事情。先照顾好自己的节奏，等你方便时我们再慢慢聊。',
-  简洁: '最近辛苦了，先忙你的。等你有空我们再聊。',
+type Contact = { id: number; name: string; relationship: string; notes: string }
+type Message = { id: number; role: 'sent' | 'received'; content: string; source: string }
+type Settings = { base_url: string; chat_model: string; embedding_model: string; api_key_configured: boolean }
+type Analysis = { answer: string; citations: { file_name: string; excerpt: string }[]; sent_preview: { history_count: number; retrieval_count: number } }
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${API}${path}`, { headers: { ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...options?.headers }, ...options })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || '本地服务暂时无法完成请求')
+  }
+  return response.json()
+}
+
+function Overlay() {
+  return <main className="overlay-shell"><div className="overlay-dot">e</div><div><strong>EchoMate 快捷助手</strong><span>只在你点击后读取剪贴板</span></div><button onClick={() => invoke('toggle_assistant')}>收起</button></main>
 }
 
 function App() {
-  const [tone, setTone] = useState<DraftTone>('自然')
-  const [message, setMessage] = useState('我最近事情有点多，可能回得慢一点。')
-  const [copied, setCopied] = useState(false)
+  const [contacts, setContacts] = useState<Contact[]>([])
+  const [selected, setSelected] = useState<number | null>(null)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [text, setText] = useState('')
+  const [source, setSource] = useState('手动粘贴')
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [apiKey, setApiKey] = useState('')
+  const [newContact, setNewContact] = useState({ name: '', relationship: '', notes: '' })
+  const [showSettings, setShowSettings] = useState(false)
+  const [showContact, setShowContact] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [analysis, setAnalysis] = useState<Analysis | null>(null)
+  const [status, setStatus] = useState('正在连接本地服务…')
+  const [busy, setBusy] = useState(false)
 
-  const copyDraft = async () => {
-    await navigator.clipboard.writeText(suggestions[tone])
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1800)
+  const refreshContacts = async () => {
+    const data = await request<Contact[]>('/contacts')
+    setContacts(data)
+    if (!selected && data[0]) setSelected(data[0].id)
   }
 
-  return (
-    <main className="app-shell">
-      <aside className="sidebar" aria-label="主导航">
-        <div className="brand-mark" aria-label="EchoMate">e</div>
-        <nav>
-          <button className="nav-item active" aria-label="对话工作台">◇</button>
-          <button className="nav-item" aria-label="联系人">◎</button>
-          <button className="nav-item" aria-label="知识库">▤</button>
-        </nav>
-        <button className="nav-item settings" aria-label="设置">⚙</button>
-      </aside>
+  const loadMessages = async (contactId: number) => setMessages(await request<Message[]>(`/contacts/${contactId}/messages`))
 
-      <section className="workspace">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">对话工作台</p>
-            <h1>给关系留一点回声</h1>
-          </div>
-          <div className="privacy-state"><span></span> 本次内容尚未发送</div>
-        </header>
+  useEffect(() => {
+    const boot = async () => {
+      try {
+        const [loadedSettings] = await Promise.all([request<Settings>('/settings'), refreshContacts()])
+        setSettings(loadedSettings)
+        setStatus('本地资料库已就绪')
+      } catch {
+        setStatus('正在启动本地 AI 服务，请稍候…')
+        window.setTimeout(boot, 1600)
+      }
+    }
+    boot()
+  }, [])
 
-        <div className="content-grid">
-          <section className="conversation-card">
-            <div className="contact-row">
-              <div className="avatar">林</div>
-              <div><strong>林知夏</strong><p>朋友 · 最近 7 天有 12 条记录</p></div>
-              <button className="quiet-button">切换对象</button>
-            </div>
+  useEffect(() => { if (selected) loadMessages(selected).catch((error) => setStatus(error.message)) }, [selected])
 
-            <div className="thread">
-              <div className="message received">最近怎么样？感觉你好像很忙。</div>
-              <div className="message sent">有一点，不过还好。你呢？</div>
-              <div className="message received">我最近事情有点多，可能回得慢一点。</div>
-            </div>
+  const createContact = async (event: FormEvent) => {
+    event.preventDefault()
+    try {
+      const contact = await request<Contact>('/contacts', { method: 'POST', body: JSON.stringify(newContact) })
+      setContacts((items) => [contact, ...items])
+      setSelected(contact.id)
+      setNewContact({ name: '', relationship: '', notes: '' })
+      setShowContact(false)
+    } catch (error) { setStatus(error instanceof Error ? error.message : '无法创建联系人') }
+  }
 
-            <label className="composer-label" htmlFor="message">粘贴想回应的内容</label>
-            <textarea id="message" value={message} onChange={(event) => setMessage(event.target.value)} />
-            <div className="composer-footer">
-              <span>仅保存到这台设备</span>
-              <button className="analyze-button">生成建议 <b>↗</b></button>
-            </div>
-          </section>
+  const saveSettings = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!settings) return
+    try {
+      const saved = await request<Settings>('/settings', { method: 'PUT', body: JSON.stringify({ ...settings, api_key: apiKey }) })
+      setSettings(saved); setApiKey(''); setShowSettings(false); setStatus('模型设置已保存在本机')
+    } catch (error) { setStatus(error instanceof Error ? error.message : '无法保存设置') }
+  }
 
-          <aside className="insight-panel">
-            <div className="panel-heading"><div><p className="eyebrow">沟通线索</p><h2>别急着填满沉默</h2></div><span className="confidence">低置信度</span></div>
-            <p className="insight-copy">这句话更像是在提前说明节奏，而不是疏远。保留余地、先表达理解，可能比追问原因更合适。</p>
+  const importDocument = async (file?: File) => {
+    if (!file) return
+    const data = new FormData(); data.append('file', file)
+    try {
+      setBusy(true)
+      const result = await request<{ file_name: string; chunks: number; duplicate: boolean }>('/documents/import', { method: 'POST', body: data })
+      setStatus(result.duplicate ? '该资料已在本地知识库中' : `已将 ${result.file_name} 分为 ${result.chunks} 个本地检索片段`)
+    } catch (error) { setStatus(error instanceof Error ? error.message : '导入失败') } finally { setBusy(false) }
+  }
 
-            <div className="signal"><div className="signal-label"><span>回应压力</span><b>偏低</b></div><div className="meter"><i className="dot calm"></i></div></div>
-            <div className="signal"><div className="signal-label"><span>需要空间</span><b>可能较高</b></div><div className="meter"><i className="dot spacious"></i></div></div>
-            <p className="evidence">依据：对方主动说明“回得慢”，但没有减少互动意愿。仅基于当前片段推测。</p>
+  const captureClipboard = async () => {
+    try { setText(await navigator.clipboard.readText()); setSource('剪贴板（用户触发）') } catch { setStatus('无法读取剪贴板，请直接粘贴内容') }
+  }
 
-            <div className="draft-block">
-              <div className="draft-head"><h3>可以这样说</h3><div className="tone-tabs">{(Object.keys(suggestions) as DraftTone[]).map((item) => <button key={item} onClick={() => setTone(item)} className={tone === item ? 'selected' : ''}>{item}</button>)}</div></div>
-              <p className="draft-text">{suggestions[tone]}</p>
-              <button className="copy-button" onClick={copyDraft}>{copied ? '已复制' : '复制草案'} <span>⌘C</span></button>
-            </div>
-          </aside>
-        </div>
-      </section>
-    </main>
-  )
+  const prepareAnalysis = () => {
+    if (!selected) return setShowContact(true)
+    if (!text.trim()) return setStatus('先粘贴或输入一段需要回应的内容')
+    if (!settings?.api_key_configured) return setShowSettings(true)
+    setShowConfirm(true)
+  }
+
+  const runAnalysis = async () => {
+    if (!selected) return
+    try {
+      setBusy(true); setShowConfirm(false); setStatus('正在请求模型…')
+      await request('/messages', { method: 'POST', body: JSON.stringify({ contact_id: selected, content: text, role: 'received', source }) })
+      const result = await request<Analysis>('/analyze', { method: 'POST', body: JSON.stringify({ contact_id: selected, content: text }) })
+      setAnalysis(result); await loadMessages(selected); setStatus('分析完成；草案仍需由你确认和发送')
+    } catch (error) { setStatus(error instanceof Error ? error.message : '分析失败') } finally { setBusy(false) }
+  }
+
+  if (window.location.hash === '#overlay') return <Overlay />
+  const active = contacts.find((contact) => contact.id === selected)
+  return <main className="app-shell">
+    <aside className="sidebar"><div className="brand-mark">e</div><nav><button className="nav-item active" title="对话工作台">◇</button><button className="nav-item" onClick={() => setShowContact(true)} title="新建联系人">◎</button><label className="nav-item file-nav" title="导入知识库">▤<input type="file" accept=".txt,.md,.pdf,.docx" onChange={(event) => importDocument(event.target.files?.[0])} /></label></nav><button className="nav-item settings" onClick={() => setShowSettings(true)} title="模型设置">⚙</button></aside>
+    <section className="workspace">
+      <header className="topbar"><div><p className="eyebrow">本地对话工作台</p><h1>先理解，再开口。</h1></div><div className="top-actions"><button className="overlay-button" onClick={() => invoke('toggle_assistant').catch(() => setStatus('悬浮窗仅在 Windows 桌面应用中可用'))}>◉ 呼出悬浮助手</button><span className="privacy-state"><i></i>{status}</span></div></header>
+      <div className="content-grid">
+        <section className="conversation-card">
+          <div className="contact-row"><div className="avatar">{active?.name?.[0] || '+'}</div><div><strong>{active?.name || '选择一个联系人'}</strong><p>{active ? `${active.relationship || '未填写关系'} · 资料仅保存在本机` : '先创建联系人，分别管理聊天资料'}</p></div><button className="quiet-button" onClick={() => setShowContact(true)}>新建对象</button></div>
+          <div className="contact-tabs">{contacts.map((contact) => <button className={contact.id === selected ? 'chosen' : ''} onClick={() => setSelected(contact.id)} key={contact.id}>{contact.name}</button>)}</div>
+          <div className="thread">{messages.length ? messages.map((message) => <div className={`message ${message.role}`} key={message.id}>{message.content}<small>{message.source}</small></div>) : <div className="empty-thread">主动粘贴你有权处理的聊天片段，或从微信/QQ 导出的文本文件导入。应用不会读取它们的私有数据库。</div>}</div>
+          <label className="composer-label" htmlFor="message">需要回应的内容</label><textarea id="message" value={text} onChange={(event) => setText(event.target.value)} placeholder="粘贴对方刚发来的内容…" />
+          <div className="composer-footer"><div><select value={source} onChange={(event) => setSource(event.target.value)}><option>手动粘贴</option><option>微信导出文本</option><option>QQ 导出文本</option><option>剪贴板（用户触发）</option></select><button className="clipboard" onClick={captureClipboard}>读取剪贴板</button></div><button className="analyze-button" onClick={prepareAnalysis} disabled={busy}>{busy ? '处理中…' : '查看发送预览 ↗'}</button></div>
+        </section>
+        <aside className="insight-panel"><div className="panel-heading"><div><p className="eyebrow">本地分析</p><h2>{analysis ? '沟通线索与草案' : '先由你决定要发送什么'}</h2></div><span className="confidence">非心理诊断</span></div>{analysis ? <><article className="answer">{analysis.answer}</article><div className="references"><h3>检索到的本地参考资料</h3>{analysis.citations.length ? analysis.citations.map((citation, index) => <p key={index}><b>{citation.file_name}</b>{citation.excerpt}</p>) : <p>本次没有使用知识库片段。</p>}</div></> : <><p className="insight-copy">建立联系人后，导入聊天指南或自己的参考资料。系统会在本机分块、向量化并检索；只有你确认时才发送必要上下文给模型。</p><ol className="workflow"><li>导入聊天指南 / TXT / PDF / DOCX</li><li>粘贴当前消息并选择联系人</li><li>检查发送预览，再请求建议</li></ol></>}<div className="data-note">不会自动读取微信、QQ 窗口，不会代替你发送消息。</div></aside>
+      </div>
+    </section>
+    {showSettings && settings && <div className="modal-backdrop"><form className="modal" onSubmit={saveSettings}><button type="button" className="close" onClick={() => setShowSettings(false)}>×</button><p className="eyebrow">模型设置</p><h2>连接你自己的模型</h2><label>Base URL<input value={settings.base_url} onChange={(event) => setSettings({ ...settings, base_url: event.target.value })} /></label><label>聊天模型<input value={settings.chat_model} onChange={(event) => setSettings({ ...settings, chat_model: event.target.value })} /></label><label>本地嵌入模型<input value={settings.embedding_model} onChange={(event) => setSettings({ ...settings, embedding_model: event.target.value })} /></label><label>API Key <small>{settings.api_key_configured ? '已保存到系统凭据库；留空则保持不变' : '不会写入本地数据库'}</small><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" /></label><button className="analyze-button" type="submit">保存本地设置</button></form></div>}
+    {showContact && <div className="modal-backdrop"><form className="modal" onSubmit={createContact}><button type="button" className="close" onClick={() => setShowContact(false)}>×</button><p className="eyebrow">联系人档案</p><h2>建立独立的对话空间</h2><label>名称<input required value={newContact.name} onChange={(event) => setNewContact({ ...newContact, name: event.target.value })} /></label><label>关系<input value={newContact.relationship} placeholder="朋友、同事、家人…" onChange={(event) => setNewContact({ ...newContact, relationship: event.target.value })} /></label><label>补充背景<textarea value={newContact.notes} onChange={(event) => setNewContact({ ...newContact, notes: event.target.value })} placeholder="仅填写你希望在分析时考虑的背景" /></label><button className="analyze-button" type="submit">创建联系人</button></form></div>}
+    {showConfirm && <div className="modal-backdrop"><section className="modal confirm"><p className="eyebrow">发送预览</p><h2>确认才会调用远端模型</h2><p>将发送：当前输入、{messages.length} 条该联系人的近期本地记录，以及最多 4 个检索到的参考片段。</p><blockquote>{text}</blockquote><div className="confirm-actions"><button className="quiet-button" onClick={() => setShowConfirm(false)}>返回编辑</button><button className="analyze-button" onClick={runAnalysis}>确认并请求建议</button></div></section></div>}
+  </main>
 }
 
 export default App
