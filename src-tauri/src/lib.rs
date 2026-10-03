@@ -2,8 +2,12 @@ use std::{env, path::PathBuf, process::Command};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 fn project_root() -> PathBuf {
-  let current = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-  if current.join("backend").exists() { current } else { current.parent().unwrap_or(&current).to_path_buf() }
+  // `current_dir` varies between `tauri dev`, an installed application and an IDE.
+  // Cargo always compiles this file from `<project>/src-tauri`, so this is stable.
+  PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    .parent()
+    .map(PathBuf::from)
+    .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 fn start_local_api() {

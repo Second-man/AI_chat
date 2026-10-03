@@ -11,7 +11,12 @@ type Settings = { base_url: string; chat_model: string; embedding_model: string;
 type Analysis = { answer: string; citations: { file_name: string; excerpt: string }[]; sent_preview: { history_count: number; retrieval_count: number } }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API}${path}`, { headers: { ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...options?.headers }, ...options })
+  let response: Response
+  try {
+    response = await fetch(`${API}${path}`, { headers: { ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...options?.headers }, ...options })
+  } catch {
+    throw new Error('本地 AI 服务未启动。请关闭应用后用 “pnpm.cmd tauri dev” 重新启动。')
+  }
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
     throw new Error(data.detail || '本地服务暂时无法完成请求')
