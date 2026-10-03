@@ -130,7 +130,21 @@ class AnalyzePayload(BaseModel):
 
 
 app = FastAPI(title="EchoMate Local API")
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "tauri://localhost"], allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
+# Tauri 2 uses `http(s)://tauri.localhost` for its WebView.  Keep this list
+# explicit: the service is loopback-only and should not be callable by arbitrary
+# web pages, while both development and packaged desktop builds can use it.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "tauri://localhost",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.on_event("startup")
