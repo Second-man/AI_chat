@@ -84,6 +84,13 @@ pub fn run() {
     .build(tauri::generate_context!())
     .expect("error while building tauri application")
     .run(|app, event| {
+      if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Focused(false), .. } = &event {
+        if label == "assistant" {
+          if let Some(window) = app.get_webview_window("assistant") {
+            let _ = window.hide();
+          }
+        }
+      }
       if matches!(event, tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }) {
         stop_local_api(app);
       }
