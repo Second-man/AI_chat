@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf, process::{Child, Command}, sync::Mutex};
+use std::{env, fs, path::PathBuf, process::{Child, Command}, sync::Mutex};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 struct LocalApiProcess(Mutex<Option<Child>>);
@@ -12,14 +12,34 @@ fn project_root() -> PathBuf {
     .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
+fn development_python(root: &PathBuf) -> PathBuf {
+  if let Ok(python) = env::var("ECHOMATE_PYTHON") {
+    return PathBuf::from(python);
+  }
+
+  // This repository is commonly kept in D:\AI_\chat-companion while its
+  // project virtual environment lives in D:\AI_\.venv. Check both locations
+  // rather than accidentally falling back to an unrelated system Python.
+  for candidate in [
+    root.join(".venv").join("python.exe"),
+    root.parent().unwrap_or(root).join(".venv").join("python.exe"),
+  ] {
+    if candidate.exists() {
+      return candidate;
+    }
+  }
+  PathBuf::from("python")
+}
+
+fn write_startup_error(data_dir: &PathBuf, message: &str) {
+  let _ = fs::create_dir_all(data_dir);
+  let _ = fs::write(data_dir.join("startup-error.log"), message);
+}
+
 fn start_local_api(app: &tauri::AppHandle) {
   let root = project_root();
   let (program, arguments, working_dir, data_dir) = if cfg!(debug_assertions) {
-    let python = env::var("ECHOMATE_PYTHON").unwrap_or_else(|_| {
-      let bundled = root.join(".venv").join("python.exe");
-      if bundled.exists() { bundled.to_string_lossy().to_string() } else { "python".to_string() }
-    });
-    (PathBuf::from(python), vec!["backend/main.py".to_string()], root.clone(), root.join(".echomate"))
+    (development_python(&root), vec!["backend/main.py".to_string()], root.clone(), root.join(".echomate"))
   } else {
     let data_dir = app.path().app_local_data_dir().unwrap_or_else(|_| root.join(".echomate"));
     let executable = app.path().resource_dir()
@@ -27,17 +47,23 @@ fn start_local_api(app: &tauri::AppHandle) {
       .join("resources").join("echomate-api").join("echomate-api.exe");
     (executable, Vec::new(), data_dir.clone(), data_dir)
   };
-  match Command::new(program)
+  let launch_message = format!("无法启动本地 AI 服务。程序：{}；工作目录：{}", program.display(), working_dir.display());
+  match Command::new(&program)
     .current_dir(working_dir)
-    .env("ECHOMATE_DATA_DIR", data_dir)
+    .env("ECHOMATE_DATA_DIR", &data_dir)
     .args(arguments)
     .spawn() {
       Ok(child) => {
         if let Ok(mut process) = app.state::<LocalApiProcess>().0.lock() {
           *process = Some(child);
         }
+        let _ = fs::remove_file(data_dir.join("startup-error.log"));
       }
-      Err(error) => eprintln!("Unable to start EchoMate local API: {error}"),
+      Err(error) => {
+        let message = format!("{launch_message}\n系统错误：{error}");
+        eprintln!("{message}");
+        write_startup_error(&data_dir, &message);
+      }
     }
 }
 
