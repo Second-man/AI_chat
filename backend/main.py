@@ -356,10 +356,21 @@ async def import_document(file: Annotated[UploadFile, File(...)]):
     with db() as connection:
         cursor = connection.execute("INSERT INTO documents(file_name, content_hash, chunk_count, created_at) VALUES (?, ?, ?, ?)", (file.filename or "document", content_hash, len(chunks), now()))
         document_id = cursor.lastrowid
+    chunk_ids = [f"doc-{document_id}-{index}" for index in range(len(chunks))]
+    store = None
     try:
         store = collection()
-        store.add(ids=[f"doc-{document_id}-{index}" for index in range(len(chunks))], documents=chunks, metadatas=[{"document_id": str(document_id), "file_name": file.filename or "document", "chunk_index": index} for index in range(len(chunks))])
+        store.add(ids=chunk_ids, documents=chunks, metadatas=[{"document_id": str(document_id), "file_name": file.filename or "document", "chunk_index": index} for index in range(len(chunks))])
     except Exception as error:
+        # Do not make a failed vectorization look like a successful import.
+        # Best-effort vector cleanup also handles stores that added a subset.
+        if store is not None:
+            try:
+                store.delete(ids=chunk_ids)
+            except Exception:
+                pass
+        with db() as connection:
+            connection.execute("DELETE FROM documents WHERE id=?", (document_id,))
         raise HTTPException(503, f"本地向量模型初始化失败：{error}") from error
     return {"id": document_id, "file_name": file.filename, "chunks": len(chunks), "duplicate": False}
 

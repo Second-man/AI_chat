@@ -101,6 +101,25 @@ class LocalWorkflowTests(unittest.TestCase):
         self.assertGreater(len(chunks), 1)
         self.assertTrue(all(len(chunk) <= 120 for chunk in chunks))
 
+    def test_failed_vectorization_does_not_leave_a_document_record(self) -> None:
+        import asyncio
+        from fastapi import HTTPException
+        from starlette.datastructures import UploadFile
+
+        original_collection = self.app.collection
+        self.app.collection = lambda: (_ for _ in ()).throw(RuntimeError("embedding unavailable"))
+        try:
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(
+                    self.app.import_document(
+                        UploadFile(filename="will-rollback.txt", file=BytesIO("本地资料".encode()))
+                    )
+                )
+            self.assertEqual(raised.exception.status_code, 503)
+            self.assertEqual(self.app.rows("SELECT * FROM documents"), [])
+        finally:
+            self.app.collection = original_collection
+
     def test_exported_chat_text_is_imported_once_with_roles(self) -> None:
         import asyncio
         from starlette.datastructures import UploadFile
