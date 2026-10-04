@@ -72,6 +72,11 @@ class LocalWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.list_messages(contact["id"])[0]["id"], message["id"])
         self.assertEqual(self.app.list_messages(contact["id"])[0]["content"], "这是一条本地测试消息")
         self.assertEqual(self.app.list_contacts()[0]["traits"], "习惯直接表达")
+        updated = self.app.update_contact(
+            contact["id"], self.app.ContactPayload(name="更新后的联系人", relationship="同事", traits="表达谨慎")
+        )
+        self.assertEqual(updated["name"], "更新后的联系人")
+        self.assertEqual(updated["traits"], "表达谨慎")
 
     def test_database_migration_is_safe_on_a_second_start(self) -> None:
         # A packaged app opens the same database on every launch. The migration

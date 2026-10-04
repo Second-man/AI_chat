@@ -278,6 +278,18 @@ def create_contact(payload: ContactPayload):
         return dict(connection.execute("SELECT * FROM contacts WHERE id=?", (cursor.lastrowid,)).fetchone())
 
 
+@app.put("/contacts/{contact_id}")
+def update_contact(contact_id: int, payload: ContactPayload):
+    with db() as connection:
+        cursor = connection.execute(
+            "UPDATE contacts SET name=?, relationship=?, notes=?, traits=? WHERE id=?",
+            (payload.name.strip(), payload.relationship.strip(), payload.notes.strip(), payload.traits.strip(), contact_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(404, "未找到联系人")
+        return dict(connection.execute("SELECT * FROM contacts WHERE id=?", (contact_id,)).fetchone())
+
+
 @app.get("/contacts/{contact_id}/messages")
 def list_messages(contact_id: int):
     return rows("SELECT id, role, content, source, created_at FROM messages WHERE contact_id=? ORDER BY id ASC", (contact_id,))
