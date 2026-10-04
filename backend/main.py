@@ -127,6 +127,15 @@ def initialize_database() -> None:
             );
             """
         )
+        # Lightweight migrations keep existing users' local databases usable.
+        settings_columns = {row["name"] for row in connection.execute("PRAGMA table_info(settings)")}
+        if "user_name" not in settings_columns:
+            connection.execute("ALTER TABLE settings ADD COLUMN user_name TEXT NOT NULL DEFAULT ''")
+        if "user_notes" not in settings_columns:
+            connection.execute("ALTER TABLE settings ADD COLUMN user_notes TEXT NOT NULL DEFAULT ''")
+        contact_columns = {row["name"] for row in connection.execute("PRAGMA table_info(contacts)")}
+        if "traits" not in contact_columns:
+            connection.execute("ALTER TABLE contacts ADD COLUMN traits TEXT NOT NULL DEFAULT ''")
 
 
 def rows(query: str, values: tuple = ()) -> list[dict]:
@@ -135,7 +144,7 @@ def rows(query: str, values: tuple = ()) -> list[dict]:
 
 
 def settings() -> dict:
-    return rows("SELECT base_url, chat_model, embedding_model, updated_at FROM settings WHERE id = 1")[0]
+    return rows("SELECT base_url, chat_model, embedding_model, user_name, user_notes, updated_at FROM settings WHERE id = 1")[0]
 
 
 def collection():
@@ -181,12 +190,15 @@ class SettingsPayload(BaseModel):
     chat_model: str = "gpt-4o-mini"
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
     api_key: str = ""
+    user_name: str = Field(default="", max_length=80)
+    user_notes: str = Field(default="", max_length=3000)
 
 
 class ContactPayload(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     relationship: str = Field(default="", max_length=80)
     notes: str = Field(default="", max_length=3000)
+    traits: str = Field(default="", max_length=3000)
 
 
 class MessagePayload(BaseModel):
@@ -241,7 +253,10 @@ def update_settings(payload: SettingsPayload):
     if not payload.base_url.startswith(("http://", "https://")):
         raise HTTPException(400, "Base URL 必须以 http:// 或 https:// 开头")
     with db() as connection:
-        connection.execute("UPDATE settings SET base_url=?, chat_model=?, embedding_model=?, updated_at=? WHERE id=1", (payload.base_url.rstrip("/"), payload.chat_model, payload.embedding_model, now()))
+        connection.execute(
+            "UPDATE settings SET base_url=?, chat_model=?, embedding_model=?, user_name=?, user_notes=?, updated_at=? WHERE id=1",
+            (payload.base_url.rstrip("/"), payload.chat_model, payload.embedding_model, payload.user_name.strip(), payload.user_notes.strip(), now()),
+        )
     if payload.api_key.strip():
         save_api_key(payload.api_key.strip())
     return get_settings()
@@ -249,13 +264,16 @@ def update_settings(payload: SettingsPayload):
 
 @app.get("/contacts")
 def list_contacts():
-    return rows("SELECT id, name, relationship, notes, created_at FROM contacts ORDER BY created_at DESC")
+    return rows("SELECT id, name, relationship, notes, traits, created_at FROM contacts ORDER BY created_at DESC")
 
 
 @app.post("/contacts")
 def create_contact(payload: ContactPayload):
     with db() as connection:
-        cursor = connection.execute("INSERT INTO contacts(name, relationship, notes, created_at) VALUES (?, ?, ?, ?)", (payload.name.strip(), payload.relationship.strip(), payload.notes.strip(), now()))
+        cursor = connection.execute(
+            "INSERT INTO contacts(name, relationship, notes, traits, created_at) VALUES (?, ?, ?, ?, ?)",
+            (payload.name.strip(), payload.relationship.strip(), payload.notes.strip(), payload.traits.strip(), now()),
+        )
         return dict(connection.execute("SELECT * FROM contacts WHERE id=?", (cursor.lastrowid,)).fetchone())
 
 
@@ -338,7 +356,7 @@ def analyze(payload: AnalyzePayload):
     api_key, _ = read_api_key()
     if not api_key:
         raise HTTPException(400, "请先在设置中保存 API Key")
-    contact = rows("SELECT name, relationship, notes FROM contacts WHERE id=?", (payload.contact_id,))
+    contact = rows("SELECT name, relationship, notes, traits FROM contacts WHERE id=?", (payload.contact_id,))
     if not contact:
         raise HTTPException(404, "未找到联系人")
     recent_messages = rows("SELECT role, content FROM messages WHERE contact_id=? ORDER BY id DESC LIMIT 12", (payload.contact_id,))[::-1]
@@ -351,9 +369,9 @@ def analyze(payload: AnalyzePayload):
         pass
     transcript = "\n".join(f"{'对方' if item['role'] == 'received' else '我'}：{item['content']}" for item in recent_messages)
     knowledge = "\n".join(f"[{item['file_name']}] {item['excerpt']}" for item in citations) or "无匹配的参考资料。"
-    system = """你是本地聊天辅助工具。只根据给出的文本提出沟通假设，不作心理诊断，不声称知道对方真实想法，不提供操控或欺骗建议。用简体中文输出：1) 沟通线索（含不确定性） 2) 可考虑的回应策略 3) 三条可直接编辑的回复草案。"""
-    user = f"联系人：{contact[0]['name']}，关系：{contact[0]['relationship']}。用户备注：{contact[0]['notes']}。\n近期聊天：\n{transcript}\n\n当前需要回应：{payload.content}\n目标：{payload.goal}\n\n可参考知识库：\n{knowledge}"
+    system = """你是本地聊天辅助工具。只根据给出的文本与用户主动填写的沟通档案提出沟通假设，不作心理诊断，不声称知道对方真实想法，不提供操控、欺骗或施压建议。所谓“特点”必须表述为可修正的沟通偏好或倾向，并标明不确定性。用简体中文输出：1) 双方沟通线索与不确定性 2) 适合当前场景的回应策略 3) 三条可直接编辑的回复草案。"""
     model_settings = settings()
+    user = f"我的档案：姓名/称呼：{model_settings['user_name']}；沟通偏好或特点：{model_settings['user_notes']}。\n联系人：{contact[0]['name']}，关系：{contact[0]['relationship']}；对方沟通特点：{contact[0]['traits']}；其他背景：{contact[0]['notes']}。\n近期聊天：\n{transcript}\n\n当前需要回应：{payload.content}\n目标：{payload.goal}\n\n可参考知识库：\n{knowledge}"
     try:
         response = ChatOpenAI(model=model_settings["chat_model"], api_key=api_key, base_url=model_settings["base_url"], temperature=0.5).invoke([SystemMessage(content=system), HumanMessage(content=user)])
     except Exception as error:

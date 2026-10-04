@@ -46,10 +46,14 @@ class LocalWorkflowTests(unittest.TestCase):
                     chat_model="test-model",
                     embedding_model="test-embedding",
                     api_key="a-local-test-secret",
+                    user_name="本地测试用户",
+                    user_notes="偏好温和、简洁的表达",
                 )
             )
             self.assertTrue(result["api_key_configured"])
             self.assertEqual(result["api_key_storage"], "本机加密保险库")
+            self.assertEqual(result["user_name"], "本地测试用户")
+            self.assertEqual(result["user_notes"], "偏好温和、简洁的表达")
             self.assertEqual(self.app.read_api_key()[0], "a-local-test-secret")
             self.assertNotIn(b"a-local-test-secret", self.app.VAULT_FILE.read_bytes())
             self.assertNotIn("api_key", self.app.settings())
@@ -58,13 +62,16 @@ class LocalWorkflowTests(unittest.TestCase):
             self.app.keyring.get_password = original_get
 
     def test_contact_and_message_are_saved_locally(self) -> None:
-        contact = self.app.create_contact(self.app.ContactPayload(name="验收联系人", relationship="朋友"))
+        contact = self.app.create_contact(
+            self.app.ContactPayload(name="验收联系人", relationship="朋友", traits="习惯直接表达")
+        )
         message = self.app.save_message(
             self.app.MessagePayload(contact_id=contact["id"], content="这是一条本地测试消息", source="手动粘贴")
         )
         self.assertEqual(self.app.list_contacts()[0]["name"], "验收联系人")
         self.assertEqual(self.app.list_messages(contact["id"])[0]["id"], message["id"])
         self.assertEqual(self.app.list_messages(contact["id"])[0]["content"], "这是一条本地测试消息")
+        self.assertEqual(self.app.list_contacts()[0]["traits"], "习惯直接表达")
 
     def test_text_and_docx_extract_to_local_chunks(self) -> None:
         text = "第一段。\n\n第二段包含足够的内容用于检验文本分块。" * 30
