@@ -31,3 +31,7 @@ if ((Test-Path -LiteralPath $executable) -and ((Get-Item -LiteralPath $executabl
   (Join-Path $PSScriptRoot 'main.py')
 
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
+
+# Keep the resource directory represented in Git after PyInstaller replaces its
+# contents. The executable itself is intentionally ignored because it is large.
+New-Item -ItemType File -Path (Join-Path $resourceRoot 'echomate-api\.gitkeep') -Force | Out-Null
