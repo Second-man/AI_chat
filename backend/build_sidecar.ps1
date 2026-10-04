@@ -34,4 +34,6 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCOD
 
 # Keep the resource directory represented in Git after PyInstaller replaces its
 # contents. The executable itself is intentionally ignored because it is large.
-New-Item -ItemType File -Path (Join-Path $resourceRoot 'echomate-api\.gitkeep') -Force | Out-Null
+# A newline keeps this placeholder identical to its tracked form, so packaging
+# does not leave an unrelated working-tree modification behind.
+[System.IO.File]::WriteAllText((Join-Path $resourceRoot 'echomate-api\.gitkeep'), [Environment]::NewLine)
