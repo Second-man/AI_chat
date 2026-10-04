@@ -104,7 +104,8 @@ def initialize_database() -> None:
               id INTEGER PRIMARY KEY CHECK (id = 1), base_url TEXT NOT NULL,
               chat_model TEXT NOT NULL, embedding_model TEXT NOT NULL, updated_at TEXT NOT NULL
             );
-            INSERT OR IGNORE INTO settings VALUES (1, 'https://api.openai.com/v1', 'gpt-4o-mini', 'BAAI/bge-small-zh-v1.5', '');
+            INSERT OR IGNORE INTO settings(id, base_url, chat_model, embedding_model, updated_at)
+            VALUES (1, 'https://api.openai.com/v1', 'gpt-4o-mini', 'BAAI/bge-small-zh-v1.5', '');
             CREATE TABLE IF NOT EXISTS contacts (
               id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, relationship TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
             );

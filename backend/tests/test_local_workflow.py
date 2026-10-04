@@ -73,6 +73,14 @@ class LocalWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.list_messages(contact["id"])[0]["content"], "这是一条本地测试消息")
         self.assertEqual(self.app.list_contacts()[0]["traits"], "习惯直接表达")
 
+    def test_database_migration_is_safe_on_a_second_start(self) -> None:
+        # A packaged app opens the same database on every launch. The migration
+        # must therefore be idempotent after adding profile columns.
+        self.app.initialize_database()
+        current = self.app.settings()
+        self.assertIn("user_name", current)
+        self.assertIn("user_notes", current)
+
     def test_text_and_docx_extract_to_local_chunks(self) -> None:
         text = "第一段。\n\n第二段包含足够的内容用于检验文本分块。" * 30
         self.assertEqual(self.app.extract_text("guide.txt", text.encode()), text)
