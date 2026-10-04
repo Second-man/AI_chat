@@ -36,4 +36,4 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCOD
 # contents. The executable itself is intentionally ignored because it is large.
 # A newline keeps this placeholder identical to its tracked form, so packaging
 # does not leave an unrelated working-tree modification behind.
-[System.IO.File]::WriteAllText((Join-Path $resourceRoot 'echomate-api\.gitkeep'), [Environment]::NewLine)
+[System.IO.File]::WriteAllText((Join-Path $resourceRoot 'echomate-api\.gitkeep'), "Generated resource directory placeholder.$([Environment]::NewLine)")
