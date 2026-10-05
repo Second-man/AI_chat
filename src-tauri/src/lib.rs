@@ -76,20 +76,15 @@ fn stop_local_api(app: &tauri::AppHandle) {
 }
 
 fn assistant_page_source() -> &'static str {
-  if cfg!(debug_assertions) {
-    // The main window is served by Vite during `tauri dev`, but dynamically
-    // created `App` URLs resolve through Tauri's packaged asset protocol.
-    // Point the child explicitly at Vite so its document and module scripts
-    // are available in development as well.
-    "http://localhost:5173/overlay.html"
-  } else {
-    "overlay.html"
-  }
+  // `index.html` is guaranteed to be present in both the Vite dev server and
+  // the installed bundle. The React entry renders the compact assistant only
+  // when the webview label is `assistant`.
+  if cfg!(debug_assertions) { "http://localhost:5173" } else { "index.html" }
 }
 
 fn assistant_page() -> WebviewUrl {
   if cfg!(debug_assertions) {
-    WebviewUrl::External(assistant_page_source().parse().expect("valid Vite overlay URL"))
+    WebviewUrl::External(assistant_page_source().parse().expect("valid Vite URL"))
   } else {
     WebviewUrl::App(assistant_page_source().into())
   }
@@ -100,8 +95,8 @@ mod tests {
   use super::assistant_page_source;
 
   #[test]
-  fn dev_overlay_uses_the_vite_document() {
-    assert_eq!(assistant_page_source(), "http://localhost:5173/overlay.html");
+  fn dev_overlay_uses_the_vite_main_document() {
+    assert_eq!(assistant_page_source(), "http://localhost:5173");
   }
 }
 
