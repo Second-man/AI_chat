@@ -87,6 +87,28 @@ fn restore_main_window(app: &tauri::AppHandle) -> Result<(), String> {
   Ok(())
 }
 
+fn expand_assistant_window(app: &tauri::AppHandle) -> Result<(), String> {
+  let assistant = app.get_webview_window("assistant")
+    .ok_or("快捷助手窗口未初始化。请重启 EchoMate 后重试。")?;
+  assistant.set_min_size(Some(tauri::LogicalSize::new(360.0, 90.0))).map_err(|error| error.to_string())?;
+  assistant.set_size(tauri::LogicalSize::new(420.0, 104.0)).map_err(|error| error.to_string())?;
+  Ok(())
+}
+
+#[tauri::command]
+fn collapse_assistant(app: tauri::AppHandle) -> Result<(), String> {
+  let assistant = app.get_webview_window("assistant")
+    .ok_or("快捷助手窗口未初始化。请重启 EchoMate 后重试。")?;
+  assistant.set_min_size::<tauri::LogicalSize<f64>>(None).map_err(|error| error.to_string())?;
+  assistant.set_size(tauri::LogicalSize::new(52.0, 52.0)).map_err(|error| error.to_string())?;
+  Ok(())
+}
+
+#[tauri::command]
+fn expand_assistant(app: tauri::AppHandle) -> Result<(), String> {
+  expand_assistant_window(&app)
+}
+
 #[tauri::command]
 fn restore_workspace(app: tauri::AppHandle) -> Result<(), String> {
   restore_main_window(&app)
@@ -106,11 +128,12 @@ fn deliver_overlay_draft(app: tauri::AppHandle, content: String) -> Result<(), S
 fn toggle_assistant(app: tauri::AppHandle) -> Result<(), String> {
   if let Some(window) = app.get_webview_window("assistant") {
     if window.is_visible().map_err(|error| error.to_string())? {
-      restore_main_window(&app)?;
+      collapse_assistant(app.clone())?;
     } else {
       if let Some(main) = app.get_webview_window("main") {
         main.minimize().map_err(|error| error.to_string())?;
       }
+      expand_assistant_window(&app)?;
       window.show().map_err(|error| error.to_string())?;
       window.set_focus().map_err(|error| error.to_string())?;
     }
@@ -123,7 +146,7 @@ fn toggle_assistant(app: tauri::AppHandle) -> Result<(), String> {
 pub fn run() {
   tauri::Builder::default()
     .manage(LocalApiProcess(Mutex::new(None)))
-    .invoke_handler(tauri::generate_handler![toggle_assistant, restore_workspace, deliver_overlay_draft])
+    .invoke_handler(tauri::generate_handler![toggle_assistant, restore_workspace, deliver_overlay_draft, collapse_assistant, expand_assistant])
     .setup(|app| {
       start_local_api(app.handle());
       if cfg!(debug_assertions) {

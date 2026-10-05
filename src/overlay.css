@@ -11,3 +11,5 @@ body { font-family:"Microsoft YaHei UI", sans-serif; }
 .overlay-shell .overlay-secondary { background:#284151; color:#d8e8e5; border:1px solid #557080; }
 .overlay-shell .overlay-close { background:transparent; color:#a8c2ba; border:1px solid #4d6d67; }
 .overlay-shell button:hover { background:#b0ead6; }
+.assistant-orb { width:52px; height:52px; border:1px solid #b8f1df; border-radius:50%; cursor:pointer; color:#10232b; background:#91d4c1; box-shadow:0 8px 24px #0008; font:700 28px/1 Georgia,serif; }
+.assistant-orb:hover { background:#b0ead6; transform:scale(1.05); }
