@@ -1,5 +1,5 @@
 use std::{env, fs, path::PathBuf, process::{Child, Command}, sync::Mutex};
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::Manager;
 
 struct LocalApiProcess(Mutex<Option<Child>>);
 
@@ -75,27 +75,6 @@ fn stop_local_api(app: &tauri::AppHandle) {
   }
 }
 
-fn assistant_page_source() -> &'static str {
-  // Tauri resolves this to its Vite proxy during development and to the
-  // embedded asset protocol in a packaged build. Both paths are reliable for
-  // a dynamically created Windows WebView.
-  "index.html"
-}
-
-fn assistant_page() -> WebviewUrl {
-  WebviewUrl::App(assistant_page_source().into())
-}
-
-#[cfg(test)]
-mod tests {
-  use super::assistant_page_source;
-
-  #[test]
-  fn overlay_uses_the_shared_app_document() {
-    assert_eq!(assistant_page_source(), "index.html");
-  }
-}
-
 #[tauri::command]
 fn toggle_assistant(app: tauri::AppHandle) -> Result<(), String> {
   if let Some(window) = app.get_webview_window("assistant") {
@@ -107,24 +86,7 @@ fn toggle_assistant(app: tauri::AppHandle) -> Result<(), String> {
     }
     return Ok(());
   }
-  // Use a dedicated document instead of routing the main workspace with a
-  // fragment. Keep this child WebView opaque: some Windows WebView2 drivers
-  // leave transparent child windows as an unpainted white rectangle.
-  WebviewWindowBuilder::new(&app, "assistant", assistant_page())
-    .title("EchoMate 快捷助手")
-    .inner_size(360.0, 86.0)
-    .min_inner_size(300.0, 72.0)
-    .resizable(false)
-    .decorations(false)
-    .transparent(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    // The initialization script runs before the React entry. It remains
-    // available whether Tauri serves the dev proxy or packaged asset.
-    .initialization_script("window.__ECHOMATE_ASSISTANT__ = true;")
-    .build()
-    .map_err(|error| error.to_string())?;
-  Ok(())
+  Err("快捷助手窗口未初始化。请重启 EchoMate 后重试。".into())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

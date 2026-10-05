@@ -12,11 +12,27 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "EchoMate",
         "width": 1180,
         "height": 780,
         "resizable": true,
         "fullscreen": false
+      },
+      {
+        "label": "assistant",
+        "title": "EchoMate 快捷助手",
+        "url": "index.html",
+        "width": 360,
+        "height": 86,
+        "minWidth": 300,
+        "minHeight": 72,
+        "resizable": false,
+        "decorations": false,
+        "transparent": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
       }
     ],
     "security": {
