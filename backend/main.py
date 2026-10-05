@@ -210,9 +210,11 @@ class MessagePayload(BaseModel):
 
 
 class AnalyzePayload(BaseModel):
-    contact_id: int
-    content: str = Field(min_length=1, max_length=12000)
-    goal: str = Field(default="自然回应并保持边界", max_length=300)
+  contact_id: int
+  content: str = Field(min_length=1, max_length=12000)
+  current_role: str = "received"
+  message_ids: list[int] = Field(default_factory=list, max_length=30)
+  goal: str = Field(default="自然回应并保持边界", max_length=300)
 
 
 app = FastAPI(title="EchoMate Local API")
@@ -304,6 +306,26 @@ def save_message(payload: MessagePayload):
         return dict(connection.execute("SELECT * FROM messages WHERE id=?", (cursor.lastrowid,)).fetchone())
 
 
+@app.delete("/messages/{message_id}")
+def delete_message(message_id: int):
+    with db() as connection:
+        cursor = connection.execute("DELETE FROM messages WHERE id=?", (message_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(404, "未找到消息")
+    return {"deleted": message_id}
+
+
+@app.delete("/contacts/{contact_id}/messages")
+def clear_contact_messages(contact_id: int):
+    with db() as connection:
+        if not connection.execute("SELECT id FROM contacts WHERE id=?", (contact_id,)).fetchone():
+            raise HTTPException(404, "未找到联系人")
+        deleted = connection.execute("DELETE FROM messages WHERE contact_id=?", (contact_id,)).rowcount
+        connection.execute("DELETE FROM chat_imports WHERE contact_id=?", (contact_id,))
+        connection.execute("DELETE FROM analyses WHERE contact_id=?", (contact_id,))
+    return {"deleted": deleted}
+
+
 @app.post("/contacts/{contact_id}/messages/import")
 async def import_chat_messages(
     contact_id: int,
@@ -383,7 +405,17 @@ def analyze(payload: AnalyzePayload):
     contact = rows("SELECT name, relationship, notes, traits FROM contacts WHERE id=?", (payload.contact_id,))
     if not contact:
         raise HTTPException(404, "未找到联系人")
-    recent_messages = rows("SELECT role, content FROM messages WHERE contact_id=? ORDER BY id DESC LIMIT 12", (payload.contact_id,))[::-1]
+    if payload.current_role not in {"received", "sent"}:
+        raise HTTPException(400, "当前消息角色无效")
+    selected_ids = list(dict.fromkeys(payload.message_ids))
+    if selected_ids:
+        placeholders = ",".join("?" for _ in selected_ids)
+        recent_messages = rows(
+            f"SELECT id, role, content FROM messages WHERE contact_id=? AND id IN ({placeholders}) ORDER BY id ASC",
+            (payload.contact_id, *selected_ids),
+        )
+    else:
+        recent_messages = []
     citations: list[dict] = []
     try:
         result = collection().query(query_texts=[payload.content], n_results=4, include=["documents", "metadatas"])
@@ -391,11 +423,12 @@ def analyze(payload: AnalyzePayload):
             citations.append({"file_name": metadata.get("file_name", "知识库"), "excerpt": document[:180]})
     except Exception:
         pass
-    transcript = "\n".join(f"{'对方' if item['role'] == 'received' else '我'}：{item['content']}" for item in recent_messages)
+    transcript = "\n".join(f"{'对方' if item['role'] == 'received' else '我'}：{item['content']}" for item in recent_messages) or "未选择历史消息。"
     knowledge = "\n".join(f"[{item['file_name']}] {item['excerpt']}" for item in citations) or "无匹配的参考资料。"
     system = """你是本地聊天辅助工具。只根据给出的文本与用户主动填写的沟通档案提出沟通假设，不作心理诊断，不声称知道对方真实想法，不提供操控、欺骗或施压建议。所谓“特点”必须表述为可修正的沟通偏好或倾向，并标明不确定性。用简体中文输出：1) 双方沟通线索与不确定性 2) 适合当前场景的回应策略 3) 三条可直接编辑的回复草案。"""
     model_settings = settings()
-    user = f"我的档案：姓名/称呼：{model_settings['user_name']}；沟通偏好或特点：{model_settings['user_notes']}。\n联系人：{contact[0]['name']}，关系：{contact[0]['relationship']}；对方沟通特点：{contact[0]['traits']}；其他背景：{contact[0]['notes']}。\n近期聊天：\n{transcript}\n\n当前需要回应：{payload.content}\n目标：{payload.goal}\n\n可参考知识库：\n{knowledge}"
+    current_speaker = "对方" if payload.current_role == "received" else "我"
+    user = f"我的档案：姓名/称呼：{model_settings['user_name']}；沟通偏好或特点：{model_settings['user_notes']}。\n联系人：{contact[0]['name']}，关系：{contact[0]['relationship']}；对方沟通特点：{contact[0]['traits']}；其他背景：{contact[0]['notes']}。\n用户本次选择的聊天上下文：\n{transcript}\n\n当前新增消息（{current_speaker}）：{payload.content}\n目标：{payload.goal}\n\n可参考知识库：\n{knowledge}"
     try:
         response = ChatOpenAI(model=model_settings["chat_model"], api_key=api_key, base_url=model_settings["base_url"], temperature=0.5).invoke([SystemMessage(content=system), HumanMessage(content=user)])
     except Exception as error:

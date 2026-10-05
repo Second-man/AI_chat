@@ -78,6 +78,43 @@ class LocalWorkflowTests(unittest.TestCase):
         self.assertEqual(updated["name"], "更新后的联系人")
         self.assertEqual(updated["traits"], "表达谨慎")
 
+    def test_messages_can_be_deleted_and_a_conversation_cleared(self) -> None:
+        contact = self.app.create_contact(self.app.ContactPayload(name="会话删除联系人"))
+        first = self.app.save_message(self.app.MessagePayload(contact_id=contact["id"], content="对方内容", role="received"))
+        self.app.save_message(self.app.MessagePayload(contact_id=contact["id"], content="我的回复", role="sent"))
+        self.app.delete_message(first["id"])
+        remaining = self.app.list_messages(contact["id"])
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0]["role"], "sent")
+        result = self.app.clear_contact_messages(contact["id"])
+        self.assertEqual(result["deleted"], 1)
+        self.assertEqual(self.app.list_messages(contact["id"]), [])
+
+    def test_analysis_uses_only_user_selected_message_context(self) -> None:
+        contact = self.app.create_contact(self.app.ContactPayload(name="上下文联系人"))
+        excluded = self.app.save_message(self.app.MessagePayload(contact_id=contact["id"], content="不要发送给模型的内容", role="received"))
+        selected = self.app.save_message(self.app.MessagePayload(contact_id=contact["id"], content="选中的上下文", role="sent"))
+        original_key, original_model, original_collection = self.app.read_api_key, self.app.ChatOpenAI, self.app.collection
+        captured: list[str] = []
+
+        class FakeModel:
+            def __init__(self, **_kwargs): pass
+            def invoke(self, messages):
+                captured.append(str(messages[-1].content))
+                return type("Response", (), {"content": "本地测试建议"})()
+
+        self.app.read_api_key = lambda: ("test-key", "test")
+        self.app.ChatOpenAI = FakeModel
+        self.app.collection = lambda: (_ for _ in ()).throw(RuntimeError("no vectors for test"))
+        try:
+            result = self.app.analyze(self.app.AnalyzePayload(contact_id=contact["id"], content="当前我发出的回复", current_role="sent", message_ids=[selected["id"]]))
+            self.assertEqual(result["sent_preview"]["history_count"], 1)
+            self.assertIn("选中的上下文", captured[0])
+            self.assertNotIn("不要发送给模型的内容", captured[0])
+            self.assertNotEqual(excluded["id"], selected["id"])
+        finally:
+            self.app.read_api_key, self.app.ChatOpenAI, self.app.collection = original_key, original_model, original_collection
+
     def test_database_migration_is_safe_on_a_second_start(self) -> None:
         # A packaged app opens the same database on every launch. The migration
         # must therefore be idempotent after adding profile columns.
