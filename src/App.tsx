@@ -24,10 +24,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json()
 }
 
-function Overlay() {
-  return <main className="overlay-shell"><div className="overlay-dot">e</div><div><strong>EchoMate 快捷助手</strong><span>只在你点击后读取剪贴板</span></div><button onClick={() => invoke('toggle_assistant')}>收起</button></main>
-}
-
 function App() {
   const [contacts, setContacts] = useState<Contact[]>([])
   const [selected, setSelected] = useState<number | null>(null)
@@ -150,7 +146,6 @@ function App() {
     } catch (error) { setStatus(error instanceof Error ? error.message : '分析失败') } finally { setBusy(false) }
   }
 
-  if (window.location.hash === '#overlay') return <Overlay />
   const active = contacts.find((contact) => contact.id === selected)
   return <main className="app-shell">
     <aside className="sidebar"><div className="brand-mark">e</div><nav><button className="nav-item active" title="对话工作台">◇</button><button className="nav-item" onClick={openNewContact} title="新建联系人">◎</button><label className="nav-item file-nav" title="导入知识库">▤<input type="file" accept=".txt,.md,.pdf,.docx" onChange={(event) => importDocument(event.target.files?.[0])} /></label></nav><button className="nav-item settings" onClick={() => setShowSettings(true)} title="模型设置">⚙</button></aside>
