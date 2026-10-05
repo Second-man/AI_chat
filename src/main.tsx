@@ -4,13 +4,12 @@ import './index.css'
 import App from './App.tsx'
 import OverlayAssistant from './OverlayAssistant.tsx'
 
-// `index.html` is the one page Tauri always packages. A secondary window uses
-// the same document and switches only its React tree by URL. This avoids an
-// installed Windows build opening a blank WebView when a separately emitted
-// HTML entry cannot be resolved by the asset protocol. Do not query the Tauri
-// window API here: Vite's external dev URL may render before that API is
-// injected, which would otherwise abort React and leave a white rectangle.
-const isAssistantWindow = new URLSearchParams(window.location.search).get('assistant') === '1'
+// `index.html` is the one page Tauri always packages. The child window uses
+// the same document and receives its mode before navigation through Tauri's
+// initialization script. This stays intact when Tauri proxies the Vite dev
+// server to `tauri://localhost` (which strips URL parameters from dynamic
+// child windows on Windows WebView2).
+const isAssistantWindow = (window as Window & { __ECHOMATE_ASSISTANT__?: boolean }).__ECHOMATE_ASSISTANT__ === true
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

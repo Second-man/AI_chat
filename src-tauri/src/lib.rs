@@ -76,18 +76,14 @@ fn stop_local_api(app: &tauri::AppHandle) {
 }
 
 fn assistant_page_source() -> &'static str {
-  // `index.html` is guaranteed to be present in both the Vite dev server and
-  // the installed bundle. A URL parameter lets React select the compact view
-  // without asking the external dev page for a Tauri API during startup.
-  if cfg!(debug_assertions) { "http://127.0.0.1:5173/?assistant=1" } else { "index.html?assistant=1" }
+  // Tauri resolves this to its Vite proxy during development and to the
+  // embedded asset protocol in a packaged build. Both paths are reliable for
+  // a dynamically created Windows WebView.
+  "index.html"
 }
 
 fn assistant_page() -> WebviewUrl {
-  if cfg!(debug_assertions) {
-    WebviewUrl::External(assistant_page_source().parse().expect("valid Vite URL"))
-  } else {
-    WebviewUrl::App(assistant_page_source().into())
-  }
+  WebviewUrl::App(assistant_page_source().into())
 }
 
 #[cfg(test)]
@@ -95,8 +91,8 @@ mod tests {
   use super::assistant_page_source;
 
   #[test]
-  fn dev_overlay_uses_the_vite_main_document_with_assistant_mode() {
-    assert_eq!(assistant_page_source(), "http://127.0.0.1:5173/?assistant=1");
+  fn overlay_uses_the_shared_app_document() {
+    assert_eq!(assistant_page_source(), "index.html");
   }
 }
 
@@ -123,6 +119,9 @@ fn toggle_assistant(app: tauri::AppHandle) -> Result<(), String> {
     .transparent(false)
     .always_on_top(true)
     .skip_taskbar(true)
+    // The initialization script runs before the React entry. It remains
+    // available whether Tauri serves the dev proxy or packaged asset.
+    .initialization_script("window.__ECHOMATE_ASSISTANT__ = true;")
     .build()
     .map_err(|error| error.to_string())?;
   Ok(())
