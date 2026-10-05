@@ -218,13 +218,15 @@ class AnalyzePayload(BaseModel):
 
 
 app = FastAPI(title="EchoMate Local API")
-# Tauri 2 uses `http(s)://tauri.localhost` for its WebView.  Keep this list
-# explicit: the service is loopback-only and should not be callable by arbitrary
-# web pages, while both development and packaged desktop builds can use it.
+# Tauri 2 uses `http(s)://tauri.localhost` for its WebView. Development is
+# deliberately bound to IPv4 because Windows WebView2 may resolve `localhost`
+# differently for a child window. Keep this list explicit: the service is
+# loopback-only and should not be callable by arbitrary web pages.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
+        "http://127.0.0.1:5173",
         "tauri://localhost",
         "http://tauri.localhost",
         "https://tauri.localhost",

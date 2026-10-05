@@ -13,6 +13,8 @@ import unittest
 from io import BytesIO
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 
 class LocalWorkflowTests(unittest.TestCase):
     @classmethod
@@ -60,6 +62,18 @@ class LocalWorkflowTests(unittest.TestCase):
         finally:
             self.app.keyring.set_password = original_set
             self.app.keyring.get_password = original_get
+
+    def test_development_ipv4_origin_passes_cors_preflight(self) -> None:
+        client = TestClient(self.app.app)
+        response = client.options(
+            "/settings",
+            headers={
+                "Origin": "http://127.0.0.1:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), "http://127.0.0.1:5173")
 
     def test_contact_and_message_are_saved_locally(self) -> None:
         contact = self.app.create_contact(
