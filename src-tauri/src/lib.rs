@@ -77,9 +77,9 @@ fn stop_local_api(app: &tauri::AppHandle) {
 
 fn assistant_page_source() -> &'static str {
   // `index.html` is guaranteed to be present in both the Vite dev server and
-  // the installed bundle. The React entry renders the compact assistant only
-  // when the webview label is `assistant`.
-  if cfg!(debug_assertions) { "http://localhost:5173" } else { "index.html" }
+  // the installed bundle. A URL parameter lets React select the compact view
+  // without asking the external dev page for a Tauri API during startup.
+  if cfg!(debug_assertions) { "http://127.0.0.1:5173/?assistant=1" } else { "index.html?assistant=1" }
 }
 
 fn assistant_page() -> WebviewUrl {
@@ -95,8 +95,8 @@ mod tests {
   use super::assistant_page_source;
 
   #[test]
-  fn dev_overlay_uses_the_vite_main_document() {
-    assert_eq!(assistant_page_source(), "http://localhost:5173");
+  fn dev_overlay_uses_the_vite_main_document_with_assistant_mode() {
+    assert_eq!(assistant_page_source(), "http://127.0.0.1:5173/?assistant=1");
   }
 }
 
