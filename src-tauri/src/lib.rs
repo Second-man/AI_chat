@@ -161,13 +161,9 @@ pub fn run() {
     .build(tauri::generate_context!())
     .expect("error while building tauri application")
     .run(|app, event| {
-      if let tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Focused(false), .. } = &event {
-        if label == "assistant" {
-          if let Some(window) = app.get_webview_window("assistant") {
-            let _ = window.hide();
-          }
-        }
-      }
+      // The assistant (including its collapsed orb) intentionally remains
+      // visible when another application gains focus. It is an always-on-top
+      // desktop companion and is hidden only by an explicit user action.
       if matches!(event, tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }) {
         stop_local_api(app);
       }
