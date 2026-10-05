@@ -87,15 +87,15 @@ fn toggle_assistant(app: tauri::AppHandle) -> Result<(), String> {
     return Ok(());
   }
   // Use a dedicated document instead of routing the main workspace with a
-  // fragment. On Windows a transparent WebView can otherwise flash or remain
-  // as an unpainted white rectangle while the main bundle initializes.
+  // fragment. Keep this child WebView opaque: some Windows WebView2 drivers
+  // leave transparent child windows as an unpainted white rectangle.
   WebviewWindowBuilder::new(&app, "assistant", WebviewUrl::App("overlay.html".into()))
     .title("EchoMate 快捷助手")
     .inner_size(360.0, 86.0)
     .min_inner_size(300.0, 72.0)
     .resizable(false)
     .decorations(false)
-    .transparent(true)
+    .transparent(false)
     .always_on_top(true)
     .skip_taskbar(true)
     .build()
