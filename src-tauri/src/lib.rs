@@ -1,5 +1,5 @@
 use std::{env, fs, path::PathBuf, process::{Child, Command}, sync::Mutex};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 struct LocalApiProcess(Mutex<Option<Child>>);
 
@@ -75,12 +75,42 @@ fn stop_local_api(app: &tauri::AppHandle) {
   }
 }
 
+fn restore_main_window(app: &tauri::AppHandle) -> Result<(), String> {
+  if let Some(assistant) = app.get_webview_window("assistant") {
+    assistant.hide().map_err(|error| error.to_string())?;
+  }
+  if let Some(main) = app.get_webview_window("main") {
+    main.unminimize().map_err(|error| error.to_string())?;
+    main.show().map_err(|error| error.to_string())?;
+    main.set_focus().map_err(|error| error.to_string())?;
+  }
+  Ok(())
+}
+
+#[tauri::command]
+fn restore_workspace(app: tauri::AppHandle) -> Result<(), String> {
+  restore_main_window(&app)
+}
+
+#[tauri::command]
+fn deliver_overlay_draft(app: tauri::AppHandle, content: String) -> Result<(), String> {
+  let content = content.trim().to_string();
+  if content.is_empty() {
+    return Err("剪贴板中没有可用文字。".into());
+  }
+  app.emit("overlay-draft", content).map_err(|error| error.to_string())?;
+  restore_main_window(&app)
+}
+
 #[tauri::command]
 fn toggle_assistant(app: tauri::AppHandle) -> Result<(), String> {
   if let Some(window) = app.get_webview_window("assistant") {
     if window.is_visible().map_err(|error| error.to_string())? {
-      window.hide().map_err(|error| error.to_string())?;
+      restore_main_window(&app)?;
     } else {
+      if let Some(main) = app.get_webview_window("main") {
+        main.minimize().map_err(|error| error.to_string())?;
+      }
       window.show().map_err(|error| error.to_string())?;
       window.set_focus().map_err(|error| error.to_string())?;
     }
@@ -93,7 +123,7 @@ fn toggle_assistant(app: tauri::AppHandle) -> Result<(), String> {
 pub fn run() {
   tauri::Builder::default()
     .manage(LocalApiProcess(Mutex::new(None)))
-    .invoke_handler(tauri::generate_handler![toggle_assistant])
+    .invoke_handler(tauri::generate_handler![toggle_assistant, restore_workspace, deliver_overlay_draft])
     .setup(|app| {
       start_local_api(app.handle());
       if cfg!(debug_assertions) {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import './App.css'
 
 const API = 'http://127.0.0.1:8787'
@@ -66,6 +67,16 @@ function App() {
   }, [])
 
   useEffect(() => { if (selected) { setContextMessageIds([]); loadMessages(selected).catch((error) => setStatus(error.message)) } }, [selected])
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    listen<string>('overlay-draft', (event) => {
+      setText(event.payload)
+      setSource('剪贴板（用户触发）')
+      setStatus('已从悬浮助手转入剪贴板内容，请选择联系人和消息角色')
+    }).then((stop) => { unlisten = stop }).catch(() => undefined)
+    return () => unlisten?.()
+  }, [])
 
   const openNewContact = () => {
     setEditingContactId(null)

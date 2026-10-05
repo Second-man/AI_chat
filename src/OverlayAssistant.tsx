@@ -1,10 +1,31 @@
+import { useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import './overlay.css'
 
 export default function OverlayAssistant() {
+  const [status, setStatus] = useState('只在你点击后读取剪贴板')
+
+  const readClipboard = async () => {
+    try {
+      const content = await navigator.clipboard.readText()
+      if (!content.trim()) {
+        setStatus('剪贴板中没有可用文字')
+        return
+      }
+      await invoke('deliver_overlay_draft', { content })
+      setStatus(`已将 ${content.trim().length} 个字转入工作台`)
+    } catch {
+      setStatus('无法读取剪贴板，请在工作台手动粘贴')
+    }
+  }
+
   return <main className="overlay-shell">
     <div className="overlay-dot">e</div>
-    <div className="overlay-copy"><strong>EchoMate 快捷助手</strong><span>仅在你点击后读取剪贴板</span></div>
-    <button onClick={() => invoke('toggle_assistant')}>收起</button>
+    <div className="overlay-copy"><strong>EchoMate 快捷助手</strong><span>{status}</span></div>
+    <div className="overlay-actions">
+      <button onClick={readClipboard}>读剪贴板</button>
+      <button className="overlay-secondary" onClick={() => invoke('restore_workspace')}>工作台</button>
+      <button className="overlay-close" onClick={() => invoke('restore_workspace')}>收起</button>
+    </div>
   </main>
 }
