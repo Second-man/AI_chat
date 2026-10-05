@@ -75,6 +75,36 @@ fn stop_local_api(app: &tauri::AppHandle) {
   }
 }
 
+fn assistant_page_source() -> &'static str {
+  if cfg!(debug_assertions) {
+    // The main window is served by Vite during `tauri dev`, but dynamically
+    // created `App` URLs resolve through Tauri's packaged asset protocol.
+    // Point the child explicitly at Vite so its document and module scripts
+    // are available in development as well.
+    "http://localhost:5173/overlay.html"
+  } else {
+    "overlay.html"
+  }
+}
+
+fn assistant_page() -> WebviewUrl {
+  if cfg!(debug_assertions) {
+    WebviewUrl::External(assistant_page_source().parse().expect("valid Vite overlay URL"))
+  } else {
+    WebviewUrl::App(assistant_page_source().into())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::assistant_page_source;
+
+  #[test]
+  fn dev_overlay_uses_the_vite_document() {
+    assert_eq!(assistant_page_source(), "http://localhost:5173/overlay.html");
+  }
+}
+
 #[tauri::command]
 fn toggle_assistant(app: tauri::AppHandle) -> Result<(), String> {
   if let Some(window) = app.get_webview_window("assistant") {
@@ -89,7 +119,7 @@ fn toggle_assistant(app: tauri::AppHandle) -> Result<(), String> {
   // Use a dedicated document instead of routing the main workspace with a
   // fragment. Keep this child WebView opaque: some Windows WebView2 drivers
   // leave transparent child windows as an unpainted white rectangle.
-  WebviewWindowBuilder::new(&app, "assistant", WebviewUrl::App("overlay.html".into()))
+  WebviewWindowBuilder::new(&app, "assistant", assistant_page())
     .title("EchoMate 快捷助手")
     .inner_size(360.0, 86.0)
     .min_inner_size(300.0, 72.0)
