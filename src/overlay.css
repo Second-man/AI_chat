@@ -29,19 +29,9 @@ button, select, textarea { font:inherit; }
 .overlay-message small { display:block; opacity:.68; font-size:10px; }
 .overlay-message p { margin:3px 0 0; white-space:pre-wrap; word-break:break-word; }
 .overlay-context-check { display:flex; align-items:center; gap:4px; width:max-content; margin-bottom:3px; color:#b7d5cc; font-size:10px; cursor:pointer; }
-.overlay-context-check input, .overlay-history-bundle input { accent-color:#8dd2bd; }
-.overlay-history-bundle { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 9px; border:1px dashed #4f8274; border-radius:10px; background:#17352f; color:#dcece6; }
-.overlay-history-bundle label { min-width:0; display:flex; align-items:center; gap:8px; cursor:pointer; }
-.overlay-history-bundle:has(input:disabled) { cursor:default; opacity:.64; }
-.overlay-history-bundle span { min-width:0; display:grid; gap:2px; }
-.overlay-history-bundle small { color:#9ec0b5; font-size:10px; }
-.overlay-history-toggle { padding:4px 7px !important; font-size:11px; }
-.overlay-history-items { display:flex; flex-direction:column; gap:7px; padding:3px 0 3px 7px; border-left:2px solid #4f8274; }
+.overlay-context-check input { accent-color:#8dd2bd; }
 .overlay-empty { align-self:center; margin:auto; color:#8299a2; font-size:12px; }
 .overlay-thread.showing-answer { display:block; align-self:start; height:min(100%, clamp(120px, calc(75vh - 143px), 540px)); min-height:0; overflow:hidden; }
-.overlay-thread.showing-history { align-self:start; width:100%; height:min(100%, clamp(120px, calc(75vh - 143px), 540px)); min-height:0; box-sizing:border-box; overflow-y:auto; }
-.overlay-thread.showing-history .overlay-history-items { width:100%; box-sizing:border-box; flex:none; }
-.overlay-thread.showing-history .overlay-message { width:82%; box-sizing:border-box; flex:none; }
 .overlay-answer { width:100%; max-width:100%; height:100%; min-height:0; box-sizing:border-box; overflow-y:auto; overscroll-behavior:contain; padding:8px 10px; border:1px solid #4f8274; border-radius:10px; background:#17352f; color:#e4f4ed; scrollbar-color:#7eafa1 #17352f; }
 .overlay-answer > div { display:flex; align-items:center; justify-content:space-between; color:#9ee0ca; font-size:11px; }
 .overlay-answer .overlay-close { padding:1px 6px; }
