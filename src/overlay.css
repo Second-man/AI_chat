@@ -14,20 +14,20 @@ button, select, textarea { font:inherit; }
 .overlay-copy span { margin-top:3px; color:#9bb5ad; font-size:10px; }
 
 .overlay-workbench { display:grid; grid-template-rows:auto auto auto minmax(90px,1fr) 86px auto; gap:9px; padding:12px; min-width:360px; min-height:320px; }
-.overlay-workbench.has-answer { grid-template-rows:auto auto auto minmax(68px,1fr) minmax(58px,120px) 76px auto; }
 .overlay-workbench-head { min-width:0; display:grid; grid-template-columns:32px minmax(0,1fr) auto; align-items:center; gap:10px; cursor:grab; user-select:none; }
 .overlay-workbench-head:active { cursor:grabbing; }
 .overlay-control-row, .overlay-footer, .overlay-footer > div { display:flex; align-items:center; gap:7px; }
 .overlay-control-row select, .overlay-footer select { min-width:0; max-width:150px; border:1px solid #486174; border-radius:8px; background:#162938; color:#eaf5f1; padding:7px 8px; }
 .overlay-control-row select { flex:1; }
 .overlay-status { margin:0; min-height:16px; color:#9bb5ad; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.overlay-thread { min-height:0; overflow:auto; display:flex; flex-direction:column; gap:7px; padding:8px; border-top:1px solid #2d4654; border-bottom:1px solid #2d4654; }
+.overlay-thread { min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; display:flex; flex-direction:column; gap:7px; padding:8px; border-top:1px solid #2d4654; border-bottom:1px solid #2d4654; scrollbar-color:#6e918a #132734; }
 .overlay-message { max-width:82%; padding:7px 9px; border-radius:10px 10px 10px 3px; background:#203647; }
 .overlay-message.sent { align-self:flex-end; border-radius:10px 10px 3px 10px; background:#6fbba8; color:#112e28; }
 .overlay-message small { display:block; opacity:.68; font-size:10px; }
 .overlay-message p { margin:3px 0 0; white-space:pre-wrap; word-break:break-word; }
 .overlay-empty { align-self:center; margin:auto; color:#8299a2; font-size:12px; }
-.overlay-answer { min-height:0; overflow:auto; padding:8px 10px; border:1px solid #4f8274; border-radius:10px; background:#17352f; color:#e4f4ed; }
+.overlay-thread.showing-answer { display:block; }
+.overlay-answer { padding:8px 10px; border:1px solid #4f8274; border-radius:10px; background:#17352f; color:#e4f4ed; }
 .overlay-answer > div { display:flex; align-items:center; justify-content:space-between; color:#9ee0ca; font-size:11px; }
 .overlay-answer .overlay-close { padding:1px 6px; }
 .overlay-answer p { margin:5px 0; white-space:pre-wrap; line-height:1.45; word-break:break-word; }
