@@ -351,6 +351,17 @@ def list_messages(contact_id: int):
     return rows("SELECT id, role, content, source, created_at FROM messages WHERE contact_id=? ORDER BY id ASC", (contact_id,))
 
 
+@app.get("/contacts/{contact_id}/analyses")
+def list_analyses(contact_id: int):
+    """Return locally stored model replies for the selected contact only."""
+    if not rows("SELECT id FROM contacts WHERE id=?", (contact_id,)):
+        raise HTTPException(404, "未找到联系人")
+    return rows(
+        "SELECT id, prompt, response, created_at FROM analyses WHERE contact_id=? ORDER BY id DESC LIMIT 30",
+        (contact_id,),
+    )
+
+
 @app.post("/messages")
 def save_message(payload: MessagePayload):
     if payload.role not in {"received", "sent"}:

@@ -118,6 +118,22 @@ class LocalWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.rows("SELECT * FROM messages WHERE contact_id=?", (contact["id"],)), [])
         self.assertEqual(self.app.rows("SELECT * FROM wechat_mappings WHERE contact_id=?", (contact["id"],)), [])
 
+    def test_local_model_reply_history_is_listed_per_contact(self) -> None:
+        contact = self.app.create_contact(self.app.ContactPayload(name="建议历史联系人"))
+        other = self.app.create_contact(self.app.ContactPayload(name="其他联系人"))
+        with self.app.db() as connection:
+            connection.execute(
+                "INSERT INTO analyses(contact_id, prompt, response, citations, created_at) VALUES (?, ?, ?, ?, ?)",
+                (contact["id"], "当前消息", "第一条本地模型建议", "[]", self.app.now()),
+            )
+            connection.execute(
+                "INSERT INTO analyses(contact_id, prompt, response, citations, created_at) VALUES (?, ?, ?, ?, ?)",
+                (other["id"], "其他消息", "不应出现", "[]", self.app.now()),
+            )
+        history = self.app.list_analyses(contact["id"])
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["response"], "第一条本地模型建议")
+
     def test_analysis_uses_only_user_selected_message_context(self) -> None:
         contact = self.app.create_contact(self.app.ContactPayload(name="上下文联系人"))
         excluded = self.app.save_message(self.app.MessagePayload(contact_id=contact["id"], content="不要发送给模型的内容", role="received"))

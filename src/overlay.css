@@ -33,6 +33,12 @@ button, select, textarea { font:inherit; }
 .overlay-answer .overlay-close { padding:1px 6px; }
 .overlay-answer p { margin:5px 0; white-space:pre-wrap; line-height:1.45; word-break:break-word; }
 .overlay-answer small { color:#a8c5bb; }
+.overlay-history { overflow-y:auto; }
+.overlay-history-item { width:100%; display:grid; gap:3px; margin:7px 0; padding:8px !important; text-align:left; color:#dbece6 !important; background:#21463d !important; border:1px solid #48776a !important; }
+.overlay-history-item:hover { background:#2a5a4d !important; }
+.overlay-history-item small { color:#9fc2b7; }
+.overlay-history-item b, .overlay-history-item span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.overlay-history-item span { color:#bfdbd2; font-size:11px; }
 .overlay-composer { width:100%; height:86px; resize:vertical; box-sizing:border-box; border:1px solid #486174; border-radius:10px; background:#0d1b27; color:#eaf5f1; padding:9px; outline:none; }
 .overlay-composer:focus { border-color:#8dd2bd; }
 .overlay-footer { justify-content:space-between; flex-wrap:wrap; }
