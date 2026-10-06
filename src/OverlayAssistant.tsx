@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import './overlay.css'
 
 export default function OverlayAssistant() {
@@ -55,14 +57,23 @@ export default function OverlayAssistant() {
     setMonitoring(true)
   }
 
+  // Use Tauri's native drag API rather than relying only on the declarative
+  // drag-region attribute; some WebView2 builds do not recognize that
+  // attribute for a secondary, undecorated webview.
+  const startDragging = (event: ReactMouseEvent<HTMLElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    getCurrentWindow().startDragging().catch(() => setStatus('当前环境不支持移动悬浮助手'))
+  }
+
   if (collapsed) {
-    return <button className="assistant-orb" data-tauri-drag-region title="拖动移动；单击展开 EchoMate 快捷助手" onClick={expand}>e</button>
+    return <button className="assistant-orb" title="拖动移动；单击展开 EchoMate 快捷助手" onMouseDown={startDragging} onClick={expand}>e</button>
   }
 
   return <main className="overlay-shell">
-    <div className="overlay-drag-handle" data-tauri-drag-region title="拖动此处移动悬浮助手">
-      <div className="overlay-dot" data-tauri-drag-region>e</div>
-      <div className="overlay-copy" data-tauri-drag-region><strong>EchoMate 快捷助手</strong><span>{status}</span></div>
+    <div className="overlay-drag-handle" title="拖动此处移动悬浮助手" onMouseDown={startDragging}>
+      <div className="overlay-dot">e</div>
+      <div className="overlay-copy"><strong>EchoMate 快捷助手</strong><span>{status}</span></div>
     </div>
     <div className="overlay-actions">
       <button onClick={readClipboard}>读剪贴板</button>
