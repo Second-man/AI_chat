@@ -159,6 +159,34 @@ class LocalWorkflowTests(unittest.TestCase):
         finally:
             self.app.read_api_key, self.app.ChatOpenAI, self.app.collection = original_key, original_model, original_collection
 
+    def test_analysis_can_include_the_local_history_package(self) -> None:
+        contact = self.app.create_contact(self.app.ContactPayload(name="历史包联系人"))
+        first = self.app.save_message(self.app.MessagePayload(contact_id=contact["id"], content="导入的早期消息", role="received"))
+        visible = self.app.save_message(self.app.MessagePayload(contact_id=contact["id"], content="最近可见消息", role="sent"))
+        original_key, original_model, original_collection = self.app.read_api_key, self.app.ChatOpenAI, self.app.collection
+        captured: list[str] = []
+
+        class FakeModel:
+            def __init__(self, **_kwargs): pass
+            def invoke(self, messages):
+                captured.append(str(messages[-1].content))
+                return type("Response", (), {"content": "本地测试建议"})()
+
+        self.app.read_api_key = lambda: ("test-key", "test")
+        self.app.ChatOpenAI = FakeModel
+        self.app.collection = lambda: (_ for _ in ()).throw(RuntimeError("no vectors for test"))
+        try:
+            result = self.app.analyze(self.app.AnalyzePayload(
+                contact_id=contact["id"], content="当前内容", current_role="received",
+                message_ids=[visible["id"]], include_history_package=True,
+                history_package_before_id=visible["id"],
+            ))
+            self.assertEqual(result["sent_preview"]["history_count"], 2)
+            self.assertIn(first["content"], captured[0])
+            self.assertIn(visible["content"], captured[0])
+        finally:
+            self.app.read_api_key, self.app.ChatOpenAI, self.app.collection = original_key, original_model, original_collection
+
     def test_database_migration_is_safe_on_a_second_start(self) -> None:
         # A packaged app opens the same database on every launch. The migration
         # must therefore be idempotent after adding profile columns.

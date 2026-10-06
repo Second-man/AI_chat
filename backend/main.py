@@ -247,6 +247,8 @@ class AnalyzePayload(BaseModel):
   content: str = Field(min_length=1, max_length=12000)
   current_role: str = "received"
   message_ids: list[int] = Field(default_factory=list, max_length=30)
+  include_history_package: bool = False
+  history_package_before_id: int | None = None
   goal: str = Field(default="自然回应并保持边界", max_length=300)
 
 
@@ -573,14 +575,19 @@ def analyze(payload: AnalyzePayload):
     if payload.current_role not in {"received", "sent"}:
         raise HTTPException(400, "当前消息角色无效")
     selected_ids = list(dict.fromkeys(payload.message_ids))
+    recent_messages: list[dict] = []
+    if payload.include_history_package and payload.history_package_before_id is not None:
+        recent_messages.extend(rows(
+            "SELECT id, role, content FROM messages WHERE contact_id=? AND id < ? ORDER BY id ASC",
+            (payload.contact_id, payload.history_package_before_id),
+        ))
     if selected_ids:
         placeholders = ",".join("?" for _ in selected_ids)
-        recent_messages = rows(
+        recent_messages.extend(rows(
             f"SELECT id, role, content FROM messages WHERE contact_id=? AND id IN ({placeholders}) ORDER BY id ASC",
             (payload.contact_id, *selected_ids),
-        )
-    else:
-        recent_messages = []
+        ))
+    recent_messages.sort(key=lambda item: item["id"])
     citations: list[dict] = []
     try:
         result = collection().query(query_texts=[payload.content], n_results=4, include=["documents", "metadatas"])

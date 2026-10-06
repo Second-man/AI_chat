@@ -28,6 +28,8 @@ export default function OverlayAssistant() {
   const [contacts, setContacts] = useState<Contact[]>([])
   const [selected, setSelected] = useState<number | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
+  const [selectedMessageIds, setSelectedMessageIds] = useState<number[]>([])
+  const [historyPackageSelected, setHistoryPackageSelected] = useState(true)
   const [draft, setDraft] = useState('')
   const [role, setRole] = useState<'received' | 'sent'>('received')
   const [busy, setBusy] = useState(false)
@@ -35,7 +37,13 @@ export default function OverlayAssistant() {
   const [analysisMinimized, setAnalysisMinimized] = useState(false)
   const [showAnalysisHistory, setShowAnalysisHistory] = useState(false)
   const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistory[]>([])
-  const loadMessages = async (contactId: number) => setMessages(await request<Message[]>(`/contacts/${contactId}/messages`))
+  const loadMessages = async (contactId: number, resetSelection = false) => {
+    const items = await request<Message[]>(`/contacts/${contactId}/messages`)
+    const visibleIds = items.slice(-3).map((message) => message.id)
+    setMessages(items)
+    setSelectedMessageIds((current) => resetSelection ? visibleIds : current.filter((id) => items.some((message) => message.id === id)))
+    if (resetSelection) setHistoryPackageSelected(true)
+  }
   const loadAnalysisHistory = async (contactId: number) => setAnalysisHistory(await request<AnalysisHistory[]>(`/contacts/${contactId}/analyses`))
   const refreshContacts = async () => {
     try {
@@ -50,7 +58,7 @@ export default function OverlayAssistant() {
   useEffect(() => {
     if (!selected) return
     setAnalysis(null); setAnalysisMinimized(false); setShowAnalysisHistory(false)
-    loadMessages(selected).catch((error) => setStatus(error.message))
+    loadMessages(selected, true).catch((error) => setStatus(error.message))
     loadAnalysisHistory(selected).catch((error) => setStatus(error.message))
   }, [selected])
   useEffect(() => {
@@ -76,7 +84,14 @@ export default function OverlayAssistant() {
       await request<Message>('/messages', { method: 'POST', body: JSON.stringify({ contact_id: selected, content: draft, role, source: '悬浮助手（用户输入）' }) })
       const result = await request<Analysis>('/analyze', {
         method: 'POST',
-        body: JSON.stringify({ contact_id: selected, content: draft, current_role: role, message_ids: messages.slice(-4).map((message) => message.id) }),
+        body: JSON.stringify({
+          contact_id: selected,
+          content: draft,
+          current_role: role,
+          message_ids: messages.slice(-3).filter((message) => selectedMessageIds.includes(message.id)).map((message) => message.id),
+          include_history_package: historyPackageSelected && messages.length > 3,
+          history_package_before_id: messages.length > 3 ? messages.slice(-3)[0].id : null,
+        }),
       })
       setAnalysis(result)
       setAnalysisMinimized(false)
@@ -106,16 +121,19 @@ export default function OverlayAssistant() {
     if (analysis && analysisMinimized) { setAnalysisMinimized(false); setShowAnalysisHistory(false); return }
     void showHistory()
   }
+  const toggleMessageContext = (messageId: number) => setSelectedMessageIds((ids) => ids.includes(messageId) ? ids.filter((id) => id !== messageId) : [...ids, messageId])
 
   if (collapsed) return <div className="assistant-orb" title="拖动外圈移动；点击 e 展开 EchoMate 快捷助手" onMouseDown={startDragging}><button className="assistant-orb-expand" title="展开 EchoMate 快捷助手" onMouseDown={(event) => event.stopPropagation()} onClick={expand}>e</button></div>
   if (showWechatConsent) return <main className="overlay-shell overlay-consent"><div className="overlay-consent-copy"><strong>授权前台微信监听</strong><span>仅本次会话读取当前前台、且你有权处理的微信可访问文本；切换窗口即暂停。不读微信数据库，不自动发送给模型。</span></div><div className="overlay-actions"><button className="overlay-secondary" onClick={dismissWechatConsent}>取消</button><button onClick={startWechatMonitor}>同意并开始</button></div></main>
 
   const active = contacts.find((contact) => contact.id === selected)
+  const visibleMessages = messages.slice(-3)
+  const historyCount = messages.length - visibleMessages.length
   return <main className="overlay-shell overlay-workbench">
     <header className="overlay-workbench-head" onMouseDown={startDragging} title="拖动此处移动悬浮助手"><div className="overlay-dot">e</div><div className="overlay-copy"><strong>{active?.name || 'EchoMate 快捷助手'}</strong><span>{active?.relationship || '本地对话工作台'}</span></div><button className="overlay-close" onMouseDown={(event) => event.stopPropagation()} onClick={collapse}>收起</button></header>
     <div className="overlay-control-row"><select aria-label="选择联系人（点击时刷新）" value={selected ?? ''} onMouseDown={() => void refreshContacts()} onChange={(event) => setSelected(Number(event.target.value))}><option value="" disabled>选择联系人</option>{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}</option>)}</select><button className="overlay-secondary overlay-refresh" title="刷新联系人列表" onClick={() => void refreshContacts()}>↻</button><button className={monitoring ? 'overlay-stop' : 'overlay-secondary'} onClick={toggleWechatMonitor}>{monitoring ? '停止监听' : '监听微信'}</button><button className="overlay-secondary" onClick={toggleAdvicePanel}>{analysis && analysisMinimized ? '展开建议' : '历史建议'}</button><button className="overlay-secondary" onClick={() => invoke('restore_workspace')}>工作台</button></div>
     <p className="overlay-status">{status}</p>
-    <section className={`overlay-thread ${(analysis && !analysisMinimized) || showAnalysisHistory ? 'showing-answer' : ''}`} aria-label={showAnalysisHistory ? '历史模型建议' : (analysis && !analysisMinimized ? '本次模型建议' : '最近聊天消息')}>{showAnalysisHistory ? <article className="overlay-answer overlay-history"><div><span>历史模型建议（本地保存）</span><button className="overlay-close" onClick={() => setShowAnalysisHistory(false)}>−</button></div>{analysisHistory.length ? analysisHistory.map((item) => <button className="overlay-history-item" key={item.id} onClick={() => { setAnalysis({ answer: item.response, citations: [] }); setAnalysisMinimized(false); setShowAnalysisHistory(false) }}><small>{new Date(item.created_at).toLocaleString()}</small><b>{item.prompt}</b><span>{item.response}</span></button>) : <p>暂无本地历史建议。</p>}</article> : (analysis && !analysisMinimized ? <article className="overlay-answer" aria-live="polite"><div><span>本次模型建议</span><button className="overlay-close" title="最小化建议" onClick={() => setAnalysisMinimized(true)}>−</button></div><p>{analysis.answer}</p>{analysis.citations.length > 0 && <small>参考：{analysis.citations.map((item) => item.file_name).join('、')}</small>}</article> : (messages.length ? messages.slice(-4).map((message) => <article className={`overlay-message ${message.role}`} key={message.id}><small>{message.role === 'sent' ? '我' : '对方'}</small><p>{message.content}</p></article>) : <p className="overlay-empty">尚无本地消息。输入一条内容开始。</p>))}</section>
+    <section className={`overlay-thread ${(analysis && !analysisMinimized) || showAnalysisHistory ? 'showing-answer' : ''}`} aria-label={showAnalysisHistory ? '历史模型建议' : (analysis && !analysisMinimized ? '本次模型建议' : '最近聊天消息')}>{showAnalysisHistory ? <article className="overlay-answer overlay-history"><div><span>历史模型建议（本地保存）</span><button className="overlay-close" onClick={() => setShowAnalysisHistory(false)}>−</button></div>{analysisHistory.length ? analysisHistory.map((item) => <button className="overlay-history-item" key={item.id} onClick={() => { setAnalysis({ answer: item.response, citations: [] }); setAnalysisMinimized(false); setShowAnalysisHistory(false) }}><small>{new Date(item.created_at).toLocaleString()}</small><b>{item.prompt}</b><span>{item.response}</span></button>) : <p>暂无本地历史建议。</p>}</article> : (analysis && !analysisMinimized ? <article className="overlay-answer" aria-live="polite"><div><span>本次模型建议</span><button className="overlay-close" title="最小化建议" onClick={() => setAnalysisMinimized(true)}>−</button></div><p>{analysis.answer}</p>{analysis.citations.length > 0 && <small>参考：{analysis.citations.map((item) => item.file_name).join('、')}</small>}</article> : (messages.length ? <><label className="overlay-history-bundle"><input type="checkbox" checked={historyPackageSelected} disabled={!historyCount} onChange={(event) => setHistoryPackageSelected(event.target.checked)} /><span><b>历史记录包</b><small>{historyCount ? `包含此前 ${historyCount} 条双方消息与导入记录` : '暂无更早的本地记录'}</small></span></label>{visibleMessages.map((message) => <article className={`overlay-message ${message.role} ${selectedMessageIds.includes(message.id) ? 'context-selected' : ''}`} key={message.id}><label className="overlay-context-check"><input type="checkbox" checked={selectedMessageIds.includes(message.id)} onChange={() => toggleMessageContext(message.id)} /> 本次分析</label><small>{message.role === 'sent' ? '我' : '对方'}</small><p>{message.content}</p></article>)}</> : <p className="overlay-empty">尚无本地消息。输入一条内容开始。</p>))}</section>
     <textarea className="overlay-composer" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={role === 'received' ? '粘贴对方刚发来的内容…' : '输入我准备发送的内容…'} />
     <footer className="overlay-footer"><div><select aria-label="消息角色" value={role} onChange={(event) => setRole(event.target.value as 'received' | 'sent')}><option value="received">对方说的</option><option value="sent">我发出的</option></select><button className="overlay-secondary" onClick={readClipboard}>读剪贴板</button></div><div><button className="overlay-secondary" disabled={busy} onClick={saveDraft}>仅保存</button><button disabled={busy} onClick={requestModelAdvice}>{busy ? '请求中…' : '请求模型建议'}</button></div></footer>
   </main>
