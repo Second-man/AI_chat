@@ -56,12 +56,14 @@ export default function OverlayAssistant() {
   }
 
   if (collapsed) {
-    return <button className="assistant-orb" title="展开 EchoMate 快捷助手" onClick={expand}>e</button>
+    return <button className="assistant-orb" data-tauri-drag-region title="拖动移动；单击展开 EchoMate 快捷助手" onClick={expand}>e</button>
   }
 
   return <main className="overlay-shell">
-    <div className="overlay-dot">e</div>
-    <div className="overlay-copy"><strong>EchoMate 快捷助手</strong><span>{status}</span></div>
+    <div className="overlay-drag-handle" data-tauri-drag-region title="拖动此处移动悬浮助手">
+      <div className="overlay-dot" data-tauri-drag-region>e</div>
+      <div className="overlay-copy" data-tauri-drag-region><strong>EchoMate 快捷助手</strong><span>{status}</span></div>
+    </div>
     <div className="overlay-actions">
       <button onClick={readClipboard}>读剪贴板</button>
       <button className={monitoring ? 'overlay-stop' : 'overlay-secondary'} onClick={toggleWechatMonitor}>{monitoring ? '停止微信监听' : '监听前台微信'}</button>
