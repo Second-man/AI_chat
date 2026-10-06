@@ -320,6 +320,24 @@ def update_contact(contact_id: int, payload: ContactPayload):
         return dict(connection.execute("SELECT * FROM contacts WHERE id=?", (contact_id,)).fetchone())
 
 
+@app.delete("/contacts/{contact_id}")
+def delete_contact_and_conversation(contact_id: int):
+    """Remove one local contact space and every record attached to it.
+
+    Foreign-key enforcement may be disabled on an existing SQLite database, so
+    the dependent records are explicitly removed before the contact itself.
+    """
+    with db() as connection:
+        if not connection.execute("SELECT id FROM contacts WHERE id=?", (contact_id,)).fetchone():
+            raise HTTPException(404, "未找到联系人")
+        connection.execute("DELETE FROM analyses WHERE contact_id=?", (contact_id,))
+        connection.execute("DELETE FROM chat_imports WHERE contact_id=?", (contact_id,))
+        connection.execute("DELETE FROM messages WHERE contact_id=?", (contact_id,))
+        connection.execute("DELETE FROM wechat_mappings WHERE contact_id=?", (contact_id,))
+        connection.execute("DELETE FROM contacts WHERE id=?", (contact_id,))
+    return {"deleted": contact_id}
+
+
 @app.get("/contacts/{contact_id}/messages")
 def list_messages(contact_id: int):
     return rows("SELECT id, role, content, source, created_at FROM messages WHERE contact_id=? ORDER BY id ASC", (contact_id,))

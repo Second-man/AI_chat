@@ -205,6 +205,19 @@ function App() {
     } catch (error) { setStatus(error instanceof Error ? error.message : '无法清空会话') }
   }
 
+  const deleteConversation = async () => {
+    if (!selected || !active) return
+    if (!window.confirm(`确定删除“${active.name}”的整个本地会话吗？联系人档案、全部消息、导入记录、分析记录和微信关联都会删除，且无法恢复。`)) return
+    try {
+      await request(`/contacts/${selected}`, { method: 'DELETE' })
+      const remaining = contacts.filter((contact) => contact.id !== selected)
+      setContacts(remaining)
+      setSelected(remaining[0]?.id ?? null)
+      setMessages([]); setContextMessageIds([]); setAnalysis(null); setText('')
+      setStatus(`“${active.name}”的本地会话已删除`)
+    } catch (error) { setStatus(error instanceof Error ? error.message : '无法删除本地会话') }
+  }
+
   const prepareAnalysis = () => {
     if (!selected) return openNewContact()
     if (!text.trim()) return setStatus('先粘贴或输入一段需要回应的内容')
@@ -243,7 +256,7 @@ function App() {
       <header className="topbar"><div><p className="eyebrow">本地对话工作台</p><h1>先理解，再开口。</h1></div><div className="top-actions"><button className="overlay-button" onClick={() => invoke('toggle_assistant').catch(() => setStatus('悬浮窗仅在 Windows 桌面应用中可用'))}>◉ 呼出悬浮助手</button><span className="privacy-state"><i></i>{status}</span></div></header>
       <div className="content-grid">
         <section className="conversation-card">
-          <div className="contact-row"><div className="avatar">{active?.name?.[0] || '+'}</div><div><strong>{active?.name || '选择一个联系人'}</strong><p>{active ? `${active.relationship || '未填写关系'} · ${active.traits ? '已填写沟通特点' : '可补充沟通特点'} · 资料仅保存在本机` : '先创建联系人，分别管理聊天资料'}</p></div>{active && <button className="quiet-button" onClick={() => openContactEditor(active)}>编辑档案</button>}<button className="quiet-button" onClick={openNewContact}>新建对象</button></div>
+          <div className="contact-row"><div className="avatar">{active?.name?.[0] || '+'}</div><div><strong>{active?.name || '选择一个联系人'}</strong><p>{active ? `${active.relationship || '未填写关系'} · ${active.traits ? '已填写沟通特点' : '可补充沟通特点'} · 资料仅保存在本机` : '先创建联系人，分别管理聊天资料'}</p></div>{active && <><button className="quiet-button" onClick={() => openContactEditor(active)}>编辑档案</button><button className="quiet-button danger" onClick={deleteConversation}>删除会话</button></>}<button className="quiet-button" onClick={openNewContact}>新建对象</button></div>
           <div className="contact-tabs">{contacts.map((contact) => <button className={contact.id === selected ? 'chosen' : ''} onClick={() => setSelected(contact.id)} key={contact.id}>{contact.name}</button>)}</div>
           <div className="thread">{messages.length ? messages.map((message) => <div className={`message ${message.role} ${contextMessageIds.includes(message.id) ? 'context-chosen' : ''}`} key={message.id}><label className="message-select"><input type="checkbox" checked={contextMessageIds.includes(message.id)} onChange={() => toggleContextMessage(message.id)} title="作为本次 AI 分析上下文" /> 作为本次上下文</label><button className="message-delete" onClick={() => deleteOneMessage(message.id)} title="删除这条本地消息">×</button>{message.content}<small>{message.role === 'sent' ? '我 · ' : '对方 · '}{message.source}</small></div>) : <div className="empty-thread">主动粘贴你有权处理的聊天片段，或从微信/QQ 导出的文本文件导入。应用不会读取它们的私有数据库。</div>}</div>
           <div className="context-toolbar"><span>已选择 {contextMessageIds.length} 条作为本次 AI 上下文</span>{messages.length > 0 && <button className="quiet-button danger" onClick={clearConversation}>清空当前会话</button>}</div>

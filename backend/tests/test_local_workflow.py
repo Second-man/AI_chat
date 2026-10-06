@@ -104,6 +104,16 @@ class LocalWorkflowTests(unittest.TestCase):
         self.assertEqual(result["deleted"], 1)
         self.assertEqual(self.app.list_messages(contact["id"]), [])
 
+    def test_deleting_a_contact_removes_its_entire_local_conversation_space(self) -> None:
+        contact = self.app.create_contact(self.app.ContactPayload(name="待删除会话"))
+        self.app.save_message(self.app.MessagePayload(contact_id=contact["id"], content="本地消息"))
+        self.app.save_wechat_mapping(self.app.WeChatMappingPayload(chat_title="待删除会话", contact_id=contact["id"]))
+        result = self.app.delete_contact_and_conversation(contact["id"])
+        self.assertEqual(result["deleted"], contact["id"])
+        self.assertEqual(self.app.rows("SELECT * FROM contacts WHERE id=?", (contact["id"],)), [])
+        self.assertEqual(self.app.rows("SELECT * FROM messages WHERE contact_id=?", (contact["id"],)), [])
+        self.assertEqual(self.app.rows("SELECT * FROM wechat_mappings WHERE contact_id=?", (contact["id"],)), [])
+
     def test_analysis_uses_only_user_selected_message_context(self) -> None:
         contact = self.app.create_contact(self.app.ContactPayload(name="上下文联系人"))
         excluded = self.app.save_message(self.app.MessagePayload(contact_id=contact["id"], content="不要发送给模型的内容", role="received"))
