@@ -33,7 +33,7 @@ class LocalWorkflowTests(unittest.TestCase):
 
     def setUp(self) -> None:
         with self.app.db() as connection:
-            for table in ("analyses", "chat_imports", "wechat_mappings", "messages", "contacts", "documents"):
+            for table in ("analyses", "chat_imports", "cleared_message_batches", "wechat_mappings", "messages", "contacts", "documents"):
                 connection.execute(f"DELETE FROM {table}")
 
     def test_settings_fall_back_to_an_encrypted_local_vault(self) -> None:
@@ -103,6 +103,10 @@ class LocalWorkflowTests(unittest.TestCase):
         result = self.app.clear_contact_messages(contact["id"])
         self.assertEqual(result["deleted"], 1)
         self.assertEqual(self.app.list_messages(contact["id"]), [])
+        self.assertIsNotNone(result["undo_batch_id"])
+        restored = self.app.undo_clear_contact_messages(contact["id"], result["undo_batch_id"])
+        self.assertEqual(restored["restored"], 1)
+        self.assertEqual(self.app.list_messages(contact["id"])[0]["content"], "我的回复")
 
     def test_deleting_a_contact_removes_its_entire_local_conversation_space(self) -> None:
         contact = self.app.create_contact(self.app.ContactPayload(name="待删除会话"))

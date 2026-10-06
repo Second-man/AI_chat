@@ -45,6 +45,7 @@ function App() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
   const [wechatMappingTitle, setWechatMappingTitle] = useState<string | null>(null)
   const [pendingWechatMessages, setPendingWechatMessages] = useState<WechatMessage[]>([])
+  const [undoClear, setUndoClear] = useState<{ contactId: number; batchId: string } | null>(null)
   const [status, setStatus] = useState('正在连接本地服务…')
   const [busy, setBusy] = useState(false)
 
@@ -197,12 +198,26 @@ function App() {
   }
 
   const clearConversation = async () => {
-    if (!selected || !window.confirm('确定清空当前联系人的全部聊天消息和导入记录吗？此操作不可恢复。')) return
+    if (!selected || !window.confirm('确定清空当前联系人的全部聊天消息和导入记录吗？你可以在 10 分钟内撤销。')) return
     try {
-      await request(`/contacts/${selected}/messages`, { method: 'DELETE' })
+      const result = await request<{ deleted: number; undo_batch_id: string | null }>(`/contacts/${selected}/messages`, { method: 'DELETE' })
       setMessages([]); setContextMessageIds([]); setAnalysis(null)
-      setStatus('当前会话已清空')
+      setUndoClear(result.undo_batch_id ? { contactId: selected, batchId: result.undo_batch_id } : null)
+      setStatus(result.undo_batch_id ? '当前会话已清空；可在 10 分钟内撤销' : '当前会话没有可清空的消息')
     } catch (error) { setStatus(error instanceof Error ? error.message : '无法清空会话') }
+  }
+
+  const undoClearConversation = async () => {
+    if (!undoClear) return
+    try {
+      const result = await request<{ restored: number }>(`/contacts/${undoClear.contactId}/messages/undo/${undoClear.batchId}`, { method: 'POST' })
+      if (selected === undoClear.contactId) await loadMessages(undoClear.contactId)
+      setUndoClear(null)
+      setStatus(`已撤销清空，恢复 ${result.restored} 条消息`)
+    } catch (error) {
+      setUndoClear(null)
+      setStatus(error instanceof Error ? error.message : '无法撤销清空操作')
+    }
   }
 
   const deleteConversation = async () => {
@@ -259,7 +274,7 @@ function App() {
           <div className="contact-row"><div className="avatar">{active?.name?.[0] || '+'}</div><div><strong>{active?.name || '选择一个联系人'}</strong><p>{active ? `${active.relationship || '未填写关系'} · ${active.traits ? '已填写沟通特点' : '可补充沟通特点'} · 资料仅保存在本机` : '先创建联系人，分别管理聊天资料'}</p></div>{active && <><button className="quiet-button" onClick={() => openContactEditor(active)}>编辑档案</button><button className="quiet-button danger" onClick={deleteConversation}>删除会话</button></>}<button className="quiet-button" onClick={openNewContact}>新建对象</button></div>
           <div className="contact-tabs">{contacts.map((contact) => <button className={contact.id === selected ? 'chosen' : ''} onClick={() => setSelected(contact.id)} key={contact.id}>{contact.name}</button>)}</div>
           <div className="thread">{messages.length ? messages.map((message) => <div className={`message ${message.role} ${contextMessageIds.includes(message.id) ? 'context-chosen' : ''}`} key={message.id}><label className="message-select"><input type="checkbox" checked={contextMessageIds.includes(message.id)} onChange={() => toggleContextMessage(message.id)} title="作为本次 AI 分析上下文" /> 作为本次上下文</label><button className="message-delete" onClick={() => deleteOneMessage(message.id)} title="删除这条本地消息">×</button>{message.content}<small>{message.role === 'sent' ? '我 · ' : '对方 · '}{message.source}</small></div>) : <div className="empty-thread">主动粘贴你有权处理的聊天片段，或从微信/QQ 导出的文本文件导入。应用不会读取它们的私有数据库。</div>}</div>
-          <div className="context-toolbar"><span>已选择 {contextMessageIds.length} 条作为本次 AI 上下文</span>{messages.length > 0 && <button className="quiet-button danger" onClick={clearConversation}>清空当前会话</button>}</div>
+          <div className="context-toolbar"><span>已选择 {contextMessageIds.length} 条作为本次 AI 上下文</span>{undoClear?.contactId === selected && <button className="quiet-button" onClick={undoClearConversation}>撤销清空</button>}{messages.length > 0 && <button className="quiet-button danger" onClick={clearConversation}>清空当前会话</button>}</div>
           <label className="composer-label" htmlFor="message">新增一条聊天消息</label><textarea id="message" value={text} onChange={(event) => setText(event.target.value)} placeholder={messageRole === 'sent' ? '输入或粘贴我刚刚发出的回复…' : '输入或粘贴对方刚发来的内容…'} />
           <div className="composer-footer"><div><select value={messageRole} onChange={(event) => setMessageRole(event.target.value as 'sent' | 'received')}><option value="received">对方说的</option><option value="sent">我发出的</option></select><select value={source} onChange={(event) => setSource(event.target.value)}><option>手动粘贴</option><option>微信导出文本</option><option>QQ 导出文本</option><option>剪贴板（用户触发）</option></select><button className="clipboard" onClick={captureClipboard}>读取剪贴板</button><label className="history-import">导入聊天 TXT<input type="file" accept=".txt,.md" onChange={(event) => importChatHistory(event.target.files?.[0])} /></label></div><div className="composer-actions"><button className="quiet-button" onClick={saveCurrentMessage} disabled={busy}>仅保存消息</button><button className="analyze-button" onClick={prepareAnalysis} disabled={busy}>{busy ? '处理中…' : '查看发送预览 ↗'}</button></div></div>
         </section>

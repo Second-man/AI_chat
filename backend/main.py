@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import re
 import sqlite3
 import base64
 import getpass
 import platform
+import secrets
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -130,6 +132,10 @@ def initialize_database() -> None:
               chat_title TEXT PRIMARY KEY, contact_id INTEGER NOT NULL, created_at TEXT NOT NULL,
               FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS cleared_message_batches (
+              id TEXT PRIMARY KEY, contact_id INTEGER NOT NULL, messages_json TEXT NOT NULL,
+              expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+            );
             """
         )
         # Lightweight migrations keep existing users' local databases usable.
@@ -148,6 +154,7 @@ def initialize_database() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS messages_contact_source_key "
             "ON messages(contact_id, source_key) WHERE source_key IS NOT NULL"
         )
+        connection.execute("DELETE FROM cleared_message_batches WHERE expires_at <= ?", (now(),))
 
 
 def rows(query: str, values: tuple = ()) -> list[dict]:
@@ -333,6 +340,7 @@ def delete_contact_and_conversation(contact_id: int):
         connection.execute("DELETE FROM analyses WHERE contact_id=?", (contact_id,))
         connection.execute("DELETE FROM chat_imports WHERE contact_id=?", (contact_id,))
         connection.execute("DELETE FROM messages WHERE contact_id=?", (contact_id,))
+        connection.execute("DELETE FROM cleared_message_batches WHERE contact_id=?", (contact_id,))
         connection.execute("DELETE FROM wechat_mappings WHERE contact_id=?", (contact_id,))
         connection.execute("DELETE FROM contacts WHERE id=?", (contact_id,))
     return {"deleted": contact_id}
@@ -410,13 +418,66 @@ def delete_message(message_id: int):
 
 @app.delete("/contacts/{contact_id}/messages")
 def clear_contact_messages(contact_id: int):
+    """Clear a local conversation while retaining a short, local undo snapshot."""
     with db() as connection:
         if not connection.execute("SELECT id FROM contacts WHERE id=?", (contact_id,)).fetchone():
             raise HTTPException(404, "未找到联系人")
-        deleted = connection.execute("DELETE FROM messages WHERE contact_id=?", (contact_id,)).rowcount
+        messages = [dict(row) for row in connection.execute(
+            "SELECT id, role, content, source, source_key, created_at FROM messages WHERE contact_id=? ORDER BY id", (contact_id,)
+        ).fetchall()]
+        imports = [dict(row) for row in connection.execute(
+            "SELECT id, file_name, content_hash, message_count, created_at FROM chat_imports WHERE contact_id=? ORDER BY id", (contact_id,)
+        ).fetchall()]
+        analyses = [dict(row) for row in connection.execute(
+            "SELECT id, prompt, response, citations, created_at FROM analyses WHERE contact_id=? ORDER BY id", (contact_id,)
+        ).fetchall()]
+        deleted = len(messages)
+        if deleted or imports or analyses:
+            batch_id = secrets.token_urlsafe(18)
+            expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+            snapshot = json.dumps({"messages": messages, "imports": imports, "analyses": analyses}, ensure_ascii=False)
+            connection.execute(
+                "INSERT INTO cleared_message_batches(id, contact_id, messages_json, expires_at, created_at) VALUES (?, ?, ?, ?, ?)",
+                (batch_id, contact_id, snapshot, expires_at, now()),
+            )
+        else:
+            batch_id = None
+            expires_at = None
+        connection.execute("DELETE FROM messages WHERE contact_id=?", (contact_id,))
         connection.execute("DELETE FROM chat_imports WHERE contact_id=?", (contact_id,))
         connection.execute("DELETE FROM analyses WHERE contact_id=?", (contact_id,))
-    return {"deleted": deleted}
+    return {"deleted": deleted, "undo_batch_id": batch_id, "undo_expires_at": expires_at}
+
+
+@app.post("/contacts/{contact_id}/messages/undo/{batch_id}")
+def undo_clear_contact_messages(contact_id: int, batch_id: str):
+    with db() as connection:
+        batch = connection.execute(
+            "SELECT messages_json, expires_at FROM cleared_message_batches WHERE id=? AND contact_id=?",
+            (batch_id, contact_id),
+        ).fetchone()
+        if not batch:
+            raise HTTPException(404, "没有可撤销的清空操作")
+        if batch["expires_at"] <= now():
+            connection.execute("DELETE FROM cleared_message_batches WHERE id=?", (batch_id,))
+            raise HTTPException(410, "撤销窗口已过期")
+        if not connection.execute("SELECT id FROM contacts WHERE id=?", (contact_id,)).fetchone():
+            raise HTTPException(404, "未找到联系人")
+        snapshot = json.loads(batch["messages_json"])
+        connection.executemany(
+            "INSERT OR IGNORE INTO messages(id, contact_id, role, content, source, source_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [(item["id"], contact_id, item["role"], item["content"], item["source"], item.get("source_key"), item["created_at"]) for item in snapshot["messages"]],
+        )
+        connection.executemany(
+            "INSERT OR IGNORE INTO chat_imports(id, contact_id, file_name, content_hash, message_count, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            [(item["id"], contact_id, item["file_name"], item["content_hash"], item["message_count"], item["created_at"]) for item in snapshot["imports"]],
+        )
+        connection.executemany(
+            "INSERT OR IGNORE INTO analyses(id, contact_id, prompt, response, citations, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            [(item["id"], contact_id, item["prompt"], item["response"], item["citations"], item["created_at"]) for item in snapshot["analyses"]],
+        )
+        connection.execute("DELETE FROM cleared_message_batches WHERE id=?", (batch_id,))
+    return {"restored": len(snapshot["messages"])}
 
 
 @app.post("/contacts/{contact_id}/messages/import")
