@@ -187,6 +187,37 @@ class LocalWorkflowTests(unittest.TestCase):
         finally:
             self.app.read_api_key, self.app.ChatOpenAI, self.app.collection = original_key, original_model, original_collection
 
+    def test_history_package_can_send_only_explicitly_selected_messages(self) -> None:
+        contact = self.app.create_contact(self.app.ContactPayload(name="可选历史联系人"))
+        included = self.app.save_message(self.app.MessagePayload(contact_id=contact["id"], content="保留的历史消息", role="received"))
+        omitted = self.app.save_message(self.app.MessagePayload(contact_id=contact["id"], content="取消勾选的历史消息", role="sent"))
+        visible = self.app.save_message(self.app.MessagePayload(contact_id=contact["id"], content="最近可见消息", role="received"))
+        original_key, original_model, original_collection = self.app.read_api_key, self.app.ChatOpenAI, self.app.collection
+        captured: list[str] = []
+
+        class FakeModel:
+            def __init__(self, **_kwargs): pass
+            def invoke(self, messages):
+                captured.append(str(messages[-1].content))
+                return type("Response", (), {"content": "本地测试建议"})()
+
+        self.app.read_api_key = lambda: ("test-key", "test")
+        self.app.ChatOpenAI = FakeModel
+        self.app.collection = lambda: (_ for _ in ()).throw(RuntimeError("no vectors for test"))
+        try:
+            result = self.app.analyze(self.app.AnalyzePayload(
+                contact_id=contact["id"], content="当前内容", current_role="received",
+                message_ids=[visible["id"]], include_history_package=True,
+                history_package_before_id=visible["id"], history_selection_mode="selected",
+                history_message_ids=[included["id"]],
+            ))
+            self.assertEqual(result["sent_preview"]["history_count"], 2)
+            self.assertIn(included["content"], captured[0])
+            self.assertIn(visible["content"], captured[0])
+            self.assertNotIn(omitted["content"], captured[0])
+        finally:
+            self.app.read_api_key, self.app.ChatOpenAI, self.app.collection = original_key, original_model, original_collection
+
     def test_database_migration_is_safe_on_a_second_start(self) -> None:
         # A packaged app opens the same database on every launch. The migration
         # must therefore be idempotent after adding profile columns.

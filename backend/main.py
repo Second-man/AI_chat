@@ -249,6 +249,8 @@ class AnalyzePayload(BaseModel):
   message_ids: list[int] = Field(default_factory=list, max_length=30)
   include_history_package: bool = False
   history_package_before_id: int | None = None
+  history_selection_mode: str = "all"
+  history_message_ids: list[int] = Field(default_factory=list, max_length=10000)
   goal: str = Field(default="自然回应并保持边界", max_length=300)
 
 
@@ -577,10 +579,30 @@ def analyze(payload: AnalyzePayload):
     selected_ids = list(dict.fromkeys(payload.message_ids))
     recent_messages: list[dict] = []
     if payload.include_history_package and payload.history_package_before_id is not None:
-        recent_messages.extend(rows(
-            "SELECT id, role, content FROM messages WHERE contact_id=? AND id < ? ORDER BY id ASC",
-            (payload.contact_id, payload.history_package_before_id),
-        ))
+        if payload.history_selection_mode not in {"all", "selected", "all_except"}:
+            raise HTTPException(400, "历史记录选择方式无效")
+        history_ids = list(dict.fromkeys(payload.history_message_ids))
+        if payload.history_selection_mode == "all":
+            recent_messages.extend(rows(
+                "SELECT id, role, content FROM messages WHERE contact_id=? AND id < ? ORDER BY id ASC",
+                (payload.contact_id, payload.history_package_before_id),
+            ))
+        elif payload.history_selection_mode == "all_except":
+            omitted = set(history_ids)
+            recent_messages.extend(item for item in rows(
+                "SELECT id, role, content FROM messages WHERE contact_id=? AND id < ? ORDER BY id ASC",
+                (payload.contact_id, payload.history_package_before_id),
+            ) if item["id"] not in omitted)
+        else:
+            for start in range(0, len(history_ids), 500):
+                batch = history_ids[start:start + 500]
+                if not batch:
+                    continue
+                placeholders = ",".join("?" for _ in batch)
+                recent_messages.extend(rows(
+                    f"SELECT id, role, content FROM messages WHERE contact_id=? AND id < ? AND id IN ({placeholders}) ORDER BY id ASC",
+                    (payload.contact_id, payload.history_package_before_id, *batch),
+                ))
     if selected_ids:
         placeholders = ",".join("?" for _ in selected_ids)
         recent_messages.extend(rows(
