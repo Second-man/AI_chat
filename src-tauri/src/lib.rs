@@ -143,7 +143,12 @@ unsafe fn foreground_process_is_wechat(hwnd: HWND) -> bool {
   let mut length = path.len() as u32;
   let result = unsafe { QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, windows::core::PWSTR(path.as_mut_ptr()), &mut length) };
   let _ = unsafe { windows::Win32::Foundation::CloseHandle(process) };
-  result.is_ok() && String::from_utf16_lossy(&path[..length as usize]).to_lowercase().contains("wechat")
+  if result.is_err() { return false; }
+  // The current Windows desktop client identifies its main process as
+  // `Weixin.exe` (and may host parts of its UI in `WeChatAppEx.exe`), while
+  // older builds use `WeChat.exe`. Accept the official variants only.
+  let executable = String::from_utf16_lossy(&path[..length as usize]).to_lowercase();
+  executable.contains("wechat") || executable.contains("weixin") || executable.contains("xwechat")
 }
 
 #[cfg(target_os = "windows")]
