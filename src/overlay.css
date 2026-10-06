@@ -1,25 +1,46 @@
 html, body, #root { width:100%; height:100%; margin:0; overflow:hidden; background:#10202b; }
 body { font-family:"Microsoft YaHei UI", sans-serif; }
-.overlay-shell { width:100%; height:100%; display:grid; align-items:center; gap:8px; padding:10px 14px; box-sizing:border-box; border-radius:18px; background:#10202bf2; border:1px solid #5a8c7e; box-shadow:0 12px 36px #0008; color:#eaf5f1; font-size:13px; }
-.overlay-drag-handle { min-width:0; display:grid; grid-template-columns:32px minmax(0,1fr); align-items:center; gap:10px; cursor:grab; user-select:none; }
-.overlay-drag-handle:active { cursor:grabbing; }
-.overlay-dot { width:32px; height:32px; flex:none; display:grid; place-items:center; color:#10232b; background:#91d4c1; border-radius:9px 9px 9px 2px; font:700 21px/1 Georgia,serif; }
-.overlay-copy { min-width:0; flex:1; }
-.overlay-copy strong, .overlay-copy span { display:block; }
-.overlay-copy strong { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.overlay-copy span { margin-top:3px; color:#9bb5ad; font-size:10px; white-space:nowrap; }
-.overlay-consent { grid-template-rows:1fr auto; padding:16px; }
-.overlay-consent-copy strong, .overlay-consent-copy span { display:block; }
-.overlay-consent-copy strong { color:#eaf5f1; font-size:15px; }
-.overlay-consent-copy span { margin-top:8px; color:#c4d5d0; font-size:12px; line-height:1.55; }
-.overlay-actions { display:flex; gap:6px; flex:none; }
-.overlay-shell button { flex:none; border:0; background:#8dd2bd; color:#133129; border-radius:8px; padding:7px 8px; cursor:pointer; font:inherit; white-space:nowrap; }
+.overlay-shell { width:100%; height:100%; box-sizing:border-box; border-radius:18px; background:#10202bf5; border:1px solid #5a8c7e; box-shadow:0 12px 36px #0008; color:#eaf5f1; font-size:13px; }
+button, select, textarea { font:inherit; }
+.overlay-shell button { border:0; background:#8dd2bd; color:#133129; border-radius:8px; padding:7px 9px; cursor:pointer; white-space:nowrap; }
+.overlay-shell button:hover { background:#b0ead6; }
+.overlay-shell button:disabled { cursor:wait; opacity:.55; }
 .overlay-shell .overlay-secondary { background:#284151; color:#d8e8e5; border:1px solid #557080; }
 .overlay-shell .overlay-stop { background:#794c4c; color:#fff2ef; border:1px solid #a37070; }
 .overlay-shell .overlay-close { background:transparent; color:#a8c2ba; border:1px solid #4d6d67; }
-.overlay-shell button:hover { background:#b0ead6; }
+.overlay-dot { width:32px; height:32px; display:grid; place-items:center; color:#10232b; background:#91d4c1; border-radius:9px 9px 9px 2px; font:700 21px/1 Georgia,serif; }
+.overlay-copy { min-width:0; }
+.overlay-copy strong, .overlay-copy span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.overlay-copy span { margin-top:3px; color:#9bb5ad; font-size:10px; }
+
+.overlay-workbench { display:grid; grid-template-rows:auto auto auto minmax(90px,1fr) 86px auto; gap:9px; padding:12px; min-width:360px; min-height:320px; }
+.overlay-workbench-head { min-width:0; display:grid; grid-template-columns:32px minmax(0,1fr) auto; align-items:center; gap:10px; cursor:grab; user-select:none; }
+.overlay-workbench-head:active { cursor:grabbing; }
+.overlay-control-row, .overlay-footer, .overlay-footer > div { display:flex; align-items:center; gap:7px; }
+.overlay-control-row select, .overlay-footer select { min-width:0; max-width:150px; border:1px solid #486174; border-radius:8px; background:#162938; color:#eaf5f1; padding:7px 8px; }
+.overlay-control-row select { flex:1; }
+.overlay-status { margin:0; min-height:16px; color:#9bb5ad; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.overlay-thread { min-height:0; overflow:auto; display:flex; flex-direction:column; gap:7px; padding:8px; border-top:1px solid #2d4654; border-bottom:1px solid #2d4654; }
+.overlay-message { max-width:82%; padding:7px 9px; border-radius:10px 10px 10px 3px; background:#203647; }
+.overlay-message.sent { align-self:flex-end; border-radius:10px 10px 3px 10px; background:#6fbba8; color:#112e28; }
+.overlay-message small { display:block; opacity:.68; font-size:10px; }
+.overlay-message p { margin:3px 0 0; white-space:pre-wrap; word-break:break-word; }
+.overlay-empty { align-self:center; margin:auto; color:#8299a2; font-size:12px; }
+.overlay-composer { width:100%; height:86px; resize:vertical; box-sizing:border-box; border:1px solid #486174; border-radius:10px; background:#0d1b27; color:#eaf5f1; padding:9px; outline:none; }
+.overlay-composer:focus { border-color:#8dd2bd; }
+.overlay-footer { justify-content:space-between; flex-wrap:wrap; }
+.overlay-footer > div:last-child { margin-left:auto; }
+
+.overlay-consent { display:grid; grid-template-rows:1fr auto; gap:16px; padding:16px; }
+.overlay-consent-copy strong, .overlay-consent-copy span { display:block; }
+.overlay-consent-copy strong { color:#eaf5f1; font-size:15px; }
+.overlay-consent-copy span { margin-top:8px; color:#c4d5d0; font-size:12px; line-height:1.55; }
+.overlay-actions { display:flex; justify-content:flex-end; gap:7px; }
+
 .assistant-orb { width:52px; height:52px; display:grid; place-items:center; border:1px solid #b8f1df; border-radius:50%; cursor:grab; color:#10232b; background:#91d4c1; box-shadow:0 8px 24px #0008; }
 .assistant-orb:active { cursor:grabbing; }
 .assistant-orb:hover { background:#b0ead6; transform:scale(1.05); }
 .assistant-orb-expand { width:30px; height:30px; border:0; border-radius:50%; cursor:pointer; color:#10232b; background:transparent; font:700 28px/1 Georgia,serif; padding:0; }
 .assistant-orb-expand:hover { background:#d5f6ea99; }
+
+@media (max-width:400px), (max-height:380px) { .overlay-workbench { grid-template-rows:auto auto auto minmax(62px,1fr) 64px auto; gap:6px; padding:9px; } .overlay-composer { height:64px; } .overlay-thread { padding:5px; } }

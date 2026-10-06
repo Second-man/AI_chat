@@ -18,6 +18,11 @@ use windows::{
 
 struct LocalApiProcess(Mutex<Option<Child>>);
 
+/// Remembers the user-selected size of the expanded companion between a
+/// collapse and a later re-open. It deliberately lives only for the running
+/// desktop session; no screen geometry is sent to the local API.
+struct AssistantWindowState(Mutex<Option<tauri::PhysicalSize<u32>>>);
+
 /// The monitor is opt-in and ephemeral. It never searches hidden windows or
 /// chat databases: it polls only the *currently foreground* WeChat window.
 struct WechatMonitor {
@@ -258,8 +263,14 @@ fn restore_main_window(app: &tauri::AppHandle) -> Result<(), String> {
 fn expand_assistant_window(app: &tauri::AppHandle) -> Result<(), String> {
   let assistant = app.get_webview_window("assistant")
     .ok_or("快捷助手窗口未初始化。请重启 EchoMate 后重试。")?;
-  assistant.set_min_size(Some(tauri::LogicalSize::new(360.0, 90.0))).map_err(|error| error.to_string())?;
-  assistant.set_size(tauri::LogicalSize::new(420.0, 132.0)).map_err(|error| error.to_string())?;
+  assistant.set_resizable(true).map_err(|error| error.to_string())?;
+  assistant.set_min_size(Some(tauri::LogicalSize::new(360.0, 320.0))).map_err(|error| error.to_string())?;
+  let size = app.state::<AssistantWindowState>().0.lock().ok().and_then(|state| *state);
+  if let Some(size) = size {
+    assistant.set_size(size).map_err(|error| error.to_string())?;
+  } else {
+    assistant.set_size(tauri::LogicalSize::new(480.0, 520.0)).map_err(|error| error.to_string())?;
+  }
   Ok(())
 }
 
@@ -267,6 +278,14 @@ fn expand_assistant_window(app: &tauri::AppHandle) -> Result<(), String> {
 fn collapse_assistant(app: tauri::AppHandle) -> Result<(), String> {
   let assistant = app.get_webview_window("assistant")
     .ok_or("快捷助手窗口未初始化。请重启 EchoMate 后重试。")?;
+  if let Ok(size) = assistant.inner_size() {
+    if size.width > 100 && size.height > 100 {
+      if let Ok(mut saved) = app.state::<AssistantWindowState>().0.lock() {
+        *saved = Some(size);
+      }
+    }
+  }
+  assistant.set_resizable(false).map_err(|error| error.to_string())?;
   assistant.set_min_size::<tauri::LogicalSize<f64>>(None).map_err(|error| error.to_string())?;
   assistant.set_size(tauri::LogicalSize::new(52.0, 52.0)).map_err(|error| error.to_string())?;
   Ok(())
@@ -281,6 +300,12 @@ fn expand_assistant(app: tauri::AppHandle) -> Result<(), String> {
 fn show_wechat_consent(app: tauri::AppHandle) -> Result<(), String> {
   let assistant = app.get_webview_window("assistant")
     .ok_or("快捷助手窗口未初始化。请重启 EchoMate 后重试。")?;
+  if let Ok(size) = assistant.inner_size() {
+    if let Ok(mut saved) = app.state::<AssistantWindowState>().0.lock() {
+      *saved = Some(size);
+    }
+  }
+  assistant.set_resizable(false).map_err(|error| error.to_string())?;
   assistant.set_min_size(Some(tauri::LogicalSize::new(360.0, 180.0))).map_err(|error| error.to_string())?;
   assistant.set_size(tauri::LogicalSize::new(420.0, 210.0)).map_err(|error| error.to_string())?;
   Ok(())
@@ -347,6 +372,7 @@ fn set_wechat_contact(app: tauri::AppHandle, contact_id: i64) {
 pub fn run() {
   tauri::Builder::default()
     .manage(LocalApiProcess(Mutex::new(None)))
+    .manage(AssistantWindowState(Mutex::new(None)))
     .manage(WechatMonitor::default())
     .invoke_handler(tauri::generate_handler![toggle_assistant, restore_workspace, deliver_overlay_draft, collapse_assistant, expand_assistant, show_wechat_consent, start_wechat_monitor, stop_wechat_monitor, set_wechat_contact])
     .setup(|app| {
