@@ -32,7 +32,24 @@ export default function OverlayAssistant() {
   const loadMessages = async (contactId: number) => setMessages(await request<Message[]>(`/contacts/${contactId}/messages`))
 
   useEffect(() => {
-    request<Contact[]>('/contacts').then((items) => { setContacts(items); if (items[0]) setSelected(items[0].id); else setStatus('请先在工作台新建一个联系人') }).catch(() => setStatus('本地服务未连接；请重新启动 EchoMate'))
+    let cancelled = false
+    let retryTimer: number | undefined
+    const refreshContacts = async () => {
+      try {
+        const items = await request<Contact[]>('/contacts')
+        if (cancelled) return
+        setContacts(items)
+        setSelected((current) => items.some((contact) => contact.id === current) ? current : (items[0]?.id ?? null))
+        setStatus(items.length ? '选择联系人后记录或预览一条消息' : '请先在工作台新建一个联系人')
+      } catch {
+        if (cancelled) return
+        setStatus('正在等待本地服务与联系人资料…')
+        retryTimer = window.setTimeout(refreshContacts, 1500)
+      }
+    }
+    refreshContacts()
+    const refreshInterval = window.setInterval(refreshContacts, 5000)
+    return () => { cancelled = true; if (retryTimer) window.clearTimeout(retryTimer); window.clearInterval(refreshInterval) }
   }, [])
   useEffect(() => { if (selected) loadMessages(selected).catch((error) => setStatus(error.message)) }, [selected])
   useEffect(() => {

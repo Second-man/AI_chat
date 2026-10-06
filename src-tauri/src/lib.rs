@@ -279,7 +279,9 @@ fn collapse_assistant(app: tauri::AppHandle) -> Result<(), String> {
   let assistant = app.get_webview_window("assistant")
     .ok_or("快捷助手窗口未初始化。请重启 EchoMate 后重试。")?;
   if let Ok(size) = assistant.inner_size() {
-    if size.width > 100 && size.height > 100 {
+    // Ignore the old 420×132 quick-bar geometry from earlier versions. The
+    // expanded assistant now has a usable minimum workbench height.
+    if size.width >= 360 && size.height >= 320 {
       if let Ok(mut saved) = app.state::<AssistantWindowState>().0.lock() {
         *saved = Some(size);
       }
