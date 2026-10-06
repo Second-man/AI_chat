@@ -19,6 +19,7 @@ button, select, textarea { font:inherit; }
 .overlay-control-row, .overlay-footer, .overlay-footer > div { display:flex; align-items:center; gap:7px; }
 .overlay-control-row select, .overlay-footer select { min-width:0; max-width:150px; border:1px solid #486174; border-radius:8px; background:#162938; color:#eaf5f1; padding:7px 8px; }
 .overlay-control-row select { flex:1; }
+.overlay-control-row .overlay-refresh { padding:7px 9px; font-size:16px; line-height:1; }
 .overlay-status { margin:0; min-height:16px; color:#9bb5ad; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .overlay-thread { min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; display:flex; flex-direction:column; gap:7px; padding:8px; border-top:1px solid #2d4654; border-bottom:1px solid #2d4654; scrollbar-color:#6e918a #132734; }
 .overlay-message { max-width:82%; padding:7px 9px; border-radius:10px 10px 10px 3px; background:#203647; }

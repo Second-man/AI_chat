@@ -32,27 +32,16 @@ export default function OverlayAssistant() {
   const [busy, setBusy] = useState(false)
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
   const loadMessages = async (contactId: number) => setMessages(await request<Message[]>(`/contacts/${contactId}/messages`))
+  const refreshContacts = async () => {
+    try {
+      const items = await request<Contact[]>('/contacts')
+      setContacts(items)
+      setSelected((current) => items.some((contact) => contact.id === current) ? current : (items[0]?.id ?? null))
+      if (!items.length) setStatus('请先在工作台新建一个联系人')
+    } catch { setStatus('本地服务未连接；点击联系人列表可再次刷新') }
+  }
 
-  useEffect(() => {
-    let cancelled = false
-    let retryTimer: number | undefined
-    const refreshContacts = async () => {
-      try {
-        const items = await request<Contact[]>('/contacts')
-        if (cancelled) return
-        setContacts(items)
-        setSelected((current) => items.some((contact) => contact.id === current) ? current : (items[0]?.id ?? null))
-        setStatus(items.length ? '选择联系人后记录或预览一条消息' : '请先在工作台新建一个联系人')
-      } catch {
-        if (cancelled) return
-        setStatus('正在等待本地服务与联系人资料…')
-        retryTimer = window.setTimeout(refreshContacts, 1500)
-      }
-    }
-    refreshContacts()
-    const refreshInterval = window.setInterval(refreshContacts, 5000)
-    return () => { cancelled = true; if (retryTimer) window.clearTimeout(retryTimer); window.clearInterval(refreshInterval) }
-  }, [])
+  useEffect(() => { void refreshContacts() }, [])
   useEffect(() => { if (selected) loadMessages(selected).catch((error) => setStatus(error.message)) }, [selected])
   useEffect(() => {
     let unlisten: (() => void) | undefined
@@ -103,7 +92,7 @@ export default function OverlayAssistant() {
   const active = contacts.find((contact) => contact.id === selected)
   return <main className="overlay-shell overlay-workbench">
     <header className="overlay-workbench-head" onMouseDown={startDragging} title="拖动此处移动悬浮助手"><div className="overlay-dot">e</div><div className="overlay-copy"><strong>{active?.name || 'EchoMate 快捷助手'}</strong><span>{active?.relationship || '本地对话工作台'}</span></div><button className="overlay-close" onMouseDown={(event) => event.stopPropagation()} onClick={collapse}>收起</button></header>
-    <div className="overlay-control-row"><select aria-label="选择联系人" value={selected ?? ''} onChange={(event) => setSelected(Number(event.target.value))}><option value="" disabled>选择联系人</option>{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}</option>)}</select><button className={monitoring ? 'overlay-stop' : 'overlay-secondary'} onClick={toggleWechatMonitor}>{monitoring ? '停止监听' : '监听微信'}</button><button className="overlay-secondary" onClick={() => invoke('restore_workspace')}>工作台</button></div>
+    <div className="overlay-control-row"><select aria-label="选择联系人（点击时刷新）" value={selected ?? ''} onMouseDown={() => void refreshContacts()} onChange={(event) => setSelected(Number(event.target.value))}><option value="" disabled>选择联系人</option>{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}</option>)}</select><button className="overlay-secondary overlay-refresh" title="刷新联系人列表" onClick={() => void refreshContacts()}>↻</button><button className={monitoring ? 'overlay-stop' : 'overlay-secondary'} onClick={toggleWechatMonitor}>{monitoring ? '停止监听' : '监听微信'}</button><button className="overlay-secondary" onClick={() => invoke('restore_workspace')}>工作台</button></div>
     <p className="overlay-status">{status}</p>
     <section className={`overlay-thread ${analysis ? 'showing-answer' : ''}`} aria-label={analysis ? '本次模型建议' : '最近聊天消息'}>{analysis ? <article className="overlay-answer" aria-live="polite"><div><span>本次模型建议</span><button className="overlay-close" onClick={() => setAnalysis(null)}>×</button></div><p>{analysis.answer}</p>{analysis.citations.length > 0 && <small>参考：{analysis.citations.map((item) => item.file_name).join('、')}</small>}</article> : (messages.length ? messages.slice(-4).map((message) => <article className={`overlay-message ${message.role}`} key={message.id}><small>{message.role === 'sent' ? '我' : '对方'}</small><p>{message.content}</p></article>) : <p className="overlay-empty">尚无本地消息。输入一条内容开始。</p>)}</section>
     <textarea className="overlay-composer" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={role === 'received' ? '粘贴对方刚发来的内容…' : '输入我准备发送的内容…'} />
