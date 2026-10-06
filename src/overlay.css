@@ -14,6 +14,8 @@ body { font-family:"Microsoft YaHei UI", sans-serif; }
 .overlay-shell .overlay-stop { background:#794c4c; color:#fff2ef; border:1px solid #a37070; }
 .overlay-shell .overlay-close { background:transparent; color:#a8c2ba; border:1px solid #4d6d67; }
 .overlay-shell button:hover { background:#b0ead6; }
-.assistant-orb { width:52px; height:52px; border:1px solid #b8f1df; border-radius:50%; cursor:grab; color:#10232b; background:#91d4c1; box-shadow:0 8px 24px #0008; font:700 28px/1 Georgia,serif; }
+.assistant-orb { width:52px; height:52px; display:grid; place-items:center; border:1px solid #b8f1df; border-radius:50%; cursor:grab; color:#10232b; background:#91d4c1; box-shadow:0 8px 24px #0008; }
 .assistant-orb:active { cursor:grabbing; }
 .assistant-orb:hover { background:#b0ead6; transform:scale(1.05); }
+.assistant-orb-expand { width:30px; height:30px; border:0; border-radius:50%; cursor:pointer; color:#10232b; background:transparent; font:700 28px/1 Georgia,serif; padding:0; }
+.assistant-orb-expand:hover { background:#d5f6ea99; }

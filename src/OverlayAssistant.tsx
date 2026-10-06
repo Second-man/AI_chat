@@ -67,7 +67,9 @@ export default function OverlayAssistant() {
   }
 
   if (collapsed) {
-    return <button className="assistant-orb" title="拖动移动；单击展开 EchoMate 快捷助手" onMouseDown={startDragging} onClick={expand}>e</button>
+    return <div className="assistant-orb" title="拖动外圈移动；点击 e 展开 EchoMate 快捷助手" onMouseDown={startDragging}>
+      <button className="assistant-orb-expand" title="展开 EchoMate 快捷助手" onMouseDown={(event) => event.stopPropagation()} onClick={expand}>e</button>
+    </div>
   }
 
   return <main className="overlay-shell">
