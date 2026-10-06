@@ -126,6 +126,10 @@ def initialize_database() -> None:
               created_at TEXT NOT NULL, UNIQUE(contact_id, content_hash),
               FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS wechat_mappings (
+              chat_title TEXT PRIMARY KEY, contact_id INTEGER NOT NULL, created_at TEXT NOT NULL,
+              FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+            );
             """
         )
         # Lightweight migrations keep existing users' local databases usable.
@@ -137,6 +141,13 @@ def initialize_database() -> None:
         contact_columns = {row["name"] for row in connection.execute("PRAGMA table_info(contacts)")}
         if "traits" not in contact_columns:
             connection.execute("ALTER TABLE contacts ADD COLUMN traits TEXT NOT NULL DEFAULT ''")
+        message_columns = {row["name"] for row in connection.execute("PRAGMA table_info(messages)")}
+        if "source_key" not in message_columns:
+            connection.execute("ALTER TABLE messages ADD COLUMN source_key TEXT")
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS messages_contact_source_key "
+            "ON messages(contact_id, source_key) WHERE source_key IS NOT NULL"
+        )
 
 
 def rows(query: str, values: tuple = ()) -> list[dict]:
@@ -207,6 +218,21 @@ class MessagePayload(BaseModel):
     content: str = Field(min_length=1, max_length=12000)
     role: str = "received"
     source: str = "manual"
+
+
+class SyncedMessagePayload(MessagePayload):
+    """A message obtained during a user-authorized desktop sync session.
+
+    `source_key` is generated on-device by the UI Automation worker.  It lets
+    us make polling idempotent without storing screenshots or an entire UI
+    Automation tree.
+    """
+    source_key: str = Field(min_length=16, max_length=128)
+
+
+class WeChatMappingPayload(BaseModel):
+    chat_title: str = Field(min_length=1, max_length=180)
+    contact_id: int
 
 
 class AnalyzePayload(BaseModel):
@@ -306,6 +332,53 @@ def save_message(payload: MessagePayload):
     with db() as connection:
         cursor = connection.execute("INSERT INTO messages(contact_id, role, content, source, created_at) VALUES (?, ?, ?, ?, ?)", (payload.contact_id, payload.role, payload.content.strip(), payload.source, now()))
         return dict(connection.execute("SELECT * FROM messages WHERE id=?", (cursor.lastrowid,)).fetchone())
+
+
+@app.post("/messages/sync")
+def save_synced_message(payload: SyncedMessagePayload):
+    """Persist one newly-observed message, once, in the selected local chat."""
+    if payload.role not in {"received", "sent"}:
+        raise HTTPException(400, "role 只能是 received 或 sent")
+    with db() as connection:
+        if not connection.execute("SELECT id FROM contacts WHERE id=?", (payload.contact_id,)).fetchone():
+            raise HTTPException(404, "未找到联系人")
+        existing = connection.execute(
+            "SELECT id, role, content, source, created_at FROM messages WHERE contact_id=? AND source_key=?",
+            (payload.contact_id, payload.source_key),
+        ).fetchone()
+        if existing:
+            return {"duplicate": True, "message": dict(existing)}
+        cursor = connection.execute(
+            "INSERT INTO messages(contact_id, role, content, source, source_key, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (payload.contact_id, payload.role, payload.content.strip(), payload.source[:80], payload.source_key, now()),
+        )
+        message = dict(connection.execute("SELECT id, role, content, source, created_at FROM messages WHERE id=?", (cursor.lastrowid,)).fetchone())
+    return {"duplicate": False, "message": message}
+
+
+@app.get("/wechat/mappings/{chat_title}")
+def get_wechat_mapping(chat_title: str):
+    mapping = rows(
+        "SELECT chat_title, contact_id FROM wechat_mappings WHERE chat_title=?",
+        (chat_title.strip(),),
+    )
+    if not mapping:
+        raise HTTPException(404, "这个微信会话尚未关联联系人")
+    return mapping[0]
+
+
+@app.put("/wechat/mappings")
+def save_wechat_mapping(payload: WeChatMappingPayload):
+    title = payload.chat_title.strip()
+    with db() as connection:
+        if not connection.execute("SELECT id FROM contacts WHERE id=?", (payload.contact_id,)).fetchone():
+            raise HTTPException(404, "未找到联系人")
+        connection.execute(
+            "INSERT INTO wechat_mappings(chat_title, contact_id, created_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(chat_title) DO UPDATE SET contact_id=excluded.contact_id",
+            (title, payload.contact_id, now()),
+        )
+    return {"chat_title": title, "contact_id": payload.contact_id}
 
 
 @app.delete("/messages/{message_id}")

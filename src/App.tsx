@@ -10,6 +10,8 @@ type Contact = { id: number; name: string; relationship: string; notes: string; 
 type Message = { id: number; role: 'sent' | 'received'; content: string; source: string }
 type Settings = { base_url: string; chat_model: string; embedding_model: string; user_name: string; user_notes: string; api_key_configured: boolean; api_key_storage?: string | null }
 type Analysis = { answer: string; citations: { file_name: string; excerpt: string }[]; sent_preview: { history_count: number; retrieval_count: number } }
+type WechatStatus = { state: string; detail: string; chatTitle?: string | null }
+type WechatMessage = { chatTitle: string; content: string; role: 'sent' | 'received'; sourceKey: string }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   let response: Response
@@ -41,6 +43,8 @@ function App() {
   const [editingContactId, setEditingContactId] = useState<number | null>(null)
   const [showConfirm, setShowConfirm] = useState(false)
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
+  const [wechatMappingTitle, setWechatMappingTitle] = useState<string | null>(null)
+  const [pendingWechatMessages, setPendingWechatMessages] = useState<WechatMessage[]>([])
   const [status, setStatus] = useState('正在连接本地服务…')
   const [busy, setBusy] = useState(false)
 
@@ -65,6 +69,34 @@ function App() {
     }
     boot()
   }, [])
+
+  const persistWechatMessage = async (message: WechatMessage, contactId: number) => {
+    const saved = await request<{ duplicate: boolean; message: Message }>('/messages/sync', {
+      method: 'POST',
+      body: JSON.stringify({ contact_id: contactId, content: message.content, role: message.role, source: '微信前台窗口（用户授权）', source_key: message.sourceKey }),
+    })
+    if (!saved.duplicate && selected === contactId) await loadMessages(contactId)
+  }
+
+  useEffect(() => {
+    const stops: (() => void)[] = []
+    listen<WechatStatus>('wechat-monitor-status', (event) => {
+      setStatus(event.payload.detail)
+      if (event.payload.state === 'mapping' && event.payload.chatTitle) setWechatMappingTitle(event.payload.chatTitle)
+    }).then((stop) => stops.push(stop)).catch(() => undefined)
+    listen<WechatMessage>('wechat-monitor-message', async (event) => {
+      const message = event.payload
+      try {
+        const mapping = await request<{ contact_id: number }>(`/wechat/mappings/${encodeURIComponent(message.chatTitle)}`)
+        await persistWechatMessage(message, mapping.contact_id)
+        setStatus('已将一条新微信可访问文本保存到本地会话')
+      } catch {
+        setPendingWechatMessages((items) => items.some((item) => item.sourceKey === message.sourceKey) ? items : [...items, message])
+        setWechatMappingTitle(message.chatTitle)
+      }
+    }).then((stop) => stops.push(stop)).catch(() => undefined)
+    return () => stops.forEach((stop) => stop())
+  }, [selected])
 
   useEffect(() => { if (selected) { setContextMessageIds([]); loadMessages(selected).catch((error) => setStatus(error.message)) } }, [selected])
 
@@ -180,6 +212,20 @@ function App() {
     setShowConfirm(true)
   }
 
+  const saveWechatMapping = async (contactId: number) => {
+    if (!wechatMappingTitle) return
+    try {
+      await request('/wechat/mappings', { method: 'PUT', body: JSON.stringify({ chat_title: wechatMappingTitle, contact_id: contactId }) })
+      await invoke('set_wechat_contact', { contactId })
+      const toSave = pendingWechatMessages.filter((item) => item.chatTitle === wechatMappingTitle)
+      for (const message of toSave) await persistWechatMessage(message, contactId)
+      setPendingWechatMessages((items) => items.filter((item) => item.chatTitle !== wechatMappingTitle))
+      setSelected(contactId)
+      setWechatMappingTitle(null)
+      setStatus(`已将微信聊天“${wechatMappingTitle}”关联到本地联系人；仅保存之后新出现的可访问文本`)
+    } catch (error) { setStatus(error instanceof Error ? error.message : '无法保存微信联系人关联') }
+  }
+
   const runAnalysis = async () => {
     if (!selected) return
     try {
@@ -210,6 +256,7 @@ function App() {
     {showSettings && settings && <div className="modal-backdrop"><form className="modal" onSubmit={saveSettings}><button type="button" className="close" onClick={() => setShowSettings(false)}>×</button><p className="eyebrow">模型与我的档案</p><h2>连接模型，并说明你希望怎样沟通</h2><label>Base URL<input value={settings.base_url} onChange={(event) => setSettings({ ...settings, base_url: event.target.value })} /></label><label>聊天模型<input value={settings.chat_model} onChange={(event) => setSettings({ ...settings, chat_model: event.target.value })} /></label><label>本地嵌入模型<input value={settings.embedding_model} onChange={(event) => setSettings({ ...settings, embedding_model: event.target.value })} /></label><label>我的称呼<input value={settings.user_name} placeholder="可留空" onChange={(event) => setSettings({ ...settings, user_name: event.target.value })} /></label><label>我的沟通偏好 / 特点<small>例如：希望表达更自然，遇到冲突容易紧张。仅作为可修正的沟通线索，不是心理诊断。</small><textarea value={settings.user_notes} onChange={(event) => setSettings({ ...settings, user_notes: event.target.value })} /></label><label>API Key <small>{settings.api_key_configured ? `已保存到${settings.api_key_storage}；留空则保持不变` : '不会写入本地数据库'}</small><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" /></label><button className="analyze-button" type="submit">保存本地设置</button></form></div>}
     {showContact && <div className="modal-backdrop"><form className="modal" onSubmit={saveContact}><button type="button" className="close" onClick={() => setShowContact(false)}>×</button><p className="eyebrow">联系人档案</p><h2>{editingContactId !== null ? '更新沟通档案' : '建立独立的对话空间'}</h2><label>名称<input required value={newContact.name} onChange={(event) => setNewContact({ ...newContact, name: event.target.value })} /></label><label>关系<input value={newContact.relationship} placeholder="朋友、同事、家人…" onChange={(event) => setNewContact({ ...newContact, relationship: event.target.value })} /></label><label>对方沟通特点<small>填写你愿意作为沟通线索的观察，例如“习惯直接表达”。不是对对方的心理定论。</small><textarea value={newContact.traits} onChange={(event) => setNewContact({ ...newContact, traits: event.target.value })} /></label><label>补充背景<textarea value={newContact.notes} onChange={(event) => setNewContact({ ...newContact, notes: event.target.value })} placeholder="仅填写你希望在分析时考虑的背景" /></label><button className="analyze-button" type="submit">{editingContactId !== null ? '保存档案' : '创建联系人'}</button></form></div>}
     {showConfirm && <div className="modal-backdrop"><section className="modal confirm"><p className="eyebrow">发送预览</p><h2>确认才会调用远端模型</h2><p>将发送：当前新增消息、你勾选的 {contextMessageIds.length} 条会话内容，以及最多 4 个检索到的参考片段。</p><blockquote>{text}</blockquote><div className="confirm-actions"><button className="quiet-button" onClick={() => setShowConfirm(false)}>返回编辑</button><button className="analyze-button" onClick={runAnalysis}>确认并请求建议</button></div></section></div>}
+    {wechatMappingTitle && <div className="modal-backdrop"><section className="modal confirm"><p className="eyebrow">微信前台监听</p><h2>关联当前聊天到本地联系人</h2><p>检测到的窗口标题为“{wechatMappingTitle}”。请确认对应联系人；未确认前不会保存这次监听到的文本。监听只读取当前前台窗口，切换窗口即暂停。</p><div className="confirm-actions"><button className="quiet-button" onClick={() => setWechatMappingTitle(null)}>暂不保存</button><select aria-label="选择本地联系人" value={selected ?? ''} onChange={(event) => setSelected(Number(event.target.value))}><option value="" disabled>选择联系人</option>{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name}</option>)}</select><button className="analyze-button" disabled={!selected} onClick={() => selected && saveWechatMapping(selected)}>确认关联</button></div></section></div>}
   </main>
 }
 

@@ -33,7 +33,7 @@ class LocalWorkflowTests(unittest.TestCase):
 
     def setUp(self) -> None:
         with self.app.db() as connection:
-            for table in ("analyses", "chat_imports", "messages", "contacts", "documents"):
+            for table in ("analyses", "chat_imports", "wechat_mappings", "messages", "contacts", "documents"):
                 connection.execute(f"DELETE FROM {table}")
 
     def test_settings_fall_back_to_an_encrypted_local_vault(self) -> None:
@@ -189,6 +189,24 @@ class LocalWorkflowTests(unittest.TestCase):
         duplicate = asyncio.run(self.app.import_chat_messages(contact["id"], upload(), "微信导出文本", "received"))
         self.assertTrue(duplicate["duplicate"])
         self.assertEqual(len(self.app.list_messages(contact["id"])), 3)
+
+    def test_user_authorized_wechat_sync_is_deduplicated_and_mapped_locally(self) -> None:
+        contact = self.app.create_contact(self.app.ContactPayload(name="微信联系人"))
+        mapping = self.app.save_wechat_mapping(
+            self.app.WeChatMappingPayload(chat_title="微信联系人", contact_id=contact["id"])
+        )
+        self.assertEqual(mapping["contact_id"], contact["id"])
+        self.assertEqual(self.app.get_wechat_mapping("微信联系人")["chat_title"], "微信联系人")
+
+        payload = self.app.SyncedMessagePayload(
+            contact_id=contact["id"], content="这条来自前台可见聊天窗口", role="received",
+            source="微信前台窗口（用户授权）", source_key="a" * 64,
+        )
+        first = self.app.save_synced_message(payload)
+        duplicate = self.app.save_synced_message(payload)
+        self.assertFalse(first["duplicate"])
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(len(self.app.list_messages(contact["id"])), 1)
 
 
 if __name__ == "__main__":

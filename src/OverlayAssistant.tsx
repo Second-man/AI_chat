@@ -1,10 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import './overlay.css'
 
 export default function OverlayAssistant() {
   const [status, setStatus] = useState('只在你点击后读取剪贴板')
   const [collapsed, setCollapsed] = useState(false)
+  const [monitoring, setMonitoring] = useState(false)
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    listen<{ state: string; detail: string }>('wechat-monitor-status', (event) => {
+      setStatus(event.payload.detail)
+      setMonitoring(['probing', 'mapping', 'monitoring', 'paused', 'fallback_ocr'].includes(event.payload.state))
+    }).then((stop) => { unlisten = stop }).catch(() => undefined)
+    return () => unlisten?.()
+  }, [])
 
   const readClipboard = async () => {
     try {
@@ -30,6 +41,20 @@ export default function OverlayAssistant() {
     setCollapsed(false)
   }
 
+  const toggleWechatMonitor = async () => {
+    if (monitoring) {
+      await invoke('stop_wechat_monitor')
+      setMonitoring(false)
+      setStatus('微信前台监听已停止')
+      return
+    }
+    const allowed = window.confirm('仅在本次会话中读取当前前台、且你有权处理的微信聊天可访问文本；切换到其他窗口会暂停。不会读取微信数据库，不会自动发送给模型。是否开始？')
+    if (!allowed) return
+    setStatus('正在等待已授权的微信聊天窗口…')
+    await invoke('start_wechat_monitor')
+    setMonitoring(true)
+  }
+
   if (collapsed) {
     return <button className="assistant-orb" title="展开 EchoMate 快捷助手" onClick={expand}>e</button>
   }
@@ -39,6 +64,7 @@ export default function OverlayAssistant() {
     <div className="overlay-copy"><strong>EchoMate 快捷助手</strong><span>{status}</span></div>
     <div className="overlay-actions">
       <button onClick={readClipboard}>读剪贴板</button>
+      <button className={monitoring ? 'overlay-stop' : 'overlay-secondary'} onClick={toggleWechatMonitor}>{monitoring ? '停止微信监听' : '监听前台微信'}</button>
       <button className="overlay-secondary" onClick={() => invoke('restore_workspace')}>工作台</button>
       <button className="overlay-close" onClick={collapse}>收起</button>
     </div>
