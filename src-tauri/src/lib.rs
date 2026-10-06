@@ -273,6 +273,15 @@ fn expand_assistant(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn show_wechat_consent(app: tauri::AppHandle) -> Result<(), String> {
+  let assistant = app.get_webview_window("assistant")
+    .ok_or("快捷助手窗口未初始化。请重启 EchoMate 后重试。")?;
+  assistant.set_min_size(Some(tauri::LogicalSize::new(360.0, 180.0))).map_err(|error| error.to_string())?;
+  assistant.set_size(tauri::LogicalSize::new(420.0, 210.0)).map_err(|error| error.to_string())?;
+  Ok(())
+}
+
+#[tauri::command]
 fn restore_workspace(app: tauri::AppHandle) -> Result<(), String> {
   restore_main_window(&app)
 }
@@ -334,7 +343,7 @@ pub fn run() {
   tauri::Builder::default()
     .manage(LocalApiProcess(Mutex::new(None)))
     .manage(WechatMonitor::default())
-    .invoke_handler(tauri::generate_handler![toggle_assistant, restore_workspace, deliver_overlay_draft, collapse_assistant, expand_assistant, start_wechat_monitor, stop_wechat_monitor, set_wechat_contact])
+    .invoke_handler(tauri::generate_handler![toggle_assistant, restore_workspace, deliver_overlay_draft, collapse_assistant, expand_assistant, show_wechat_consent, start_wechat_monitor, stop_wechat_monitor, set_wechat_contact])
     .setup(|app| {
       start_local_api(app.handle());
       if cfg!(debug_assertions) {

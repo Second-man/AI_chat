@@ -8,6 +8,10 @@ body { font-family:"Microsoft YaHei UI", sans-serif; }
 .overlay-copy strong, .overlay-copy span { display:block; }
 .overlay-copy strong { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .overlay-copy span { margin-top:3px; color:#9bb5ad; font-size:10px; white-space:nowrap; }
+.overlay-consent { grid-template-rows:1fr auto; padding:16px; }
+.overlay-consent-copy strong, .overlay-consent-copy span { display:block; }
+.overlay-consent-copy strong { color:#eaf5f1; font-size:15px; }
+.overlay-consent-copy span { margin-top:8px; color:#c4d5d0; font-size:12px; line-height:1.55; }
 .overlay-actions { display:flex; gap:6px; flex:none; }
 .overlay-shell button { flex:none; border:0; background:#8dd2bd; color:#133129; border-radius:8px; padding:7px 8px; cursor:pointer; font:inherit; white-space:nowrap; }
 .overlay-shell .overlay-secondary { background:#284151; color:#d8e8e5; border:1px solid #557080; }

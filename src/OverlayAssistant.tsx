@@ -9,6 +9,7 @@ export default function OverlayAssistant() {
   const [status, setStatus] = useState('只在你点击后读取剪贴板')
   const [collapsed, setCollapsed] = useState(false)
   const [monitoring, setMonitoring] = useState(false)
+  const [showWechatConsent, setShowWechatConsent] = useState(false)
 
   useEffect(() => {
     let unlisten: (() => void) | undefined
@@ -50,8 +51,17 @@ export default function OverlayAssistant() {
       setStatus('微信前台监听已停止')
       return
     }
-    const allowed = window.confirm('仅在本次会话中读取当前前台、且你有权处理的微信聊天可访问文本；切换到其他窗口会暂停。不会读取微信数据库，不会自动发送给模型。是否开始？')
-    if (!allowed) return
+    await invoke('show_wechat_consent')
+    setShowWechatConsent(true)
+  }
+
+  const dismissWechatConsent = async () => {
+    await invoke('expand_assistant')
+    setShowWechatConsent(false)
+  }
+
+  const startWechatMonitor = async () => {
+    await dismissWechatConsent()
     setStatus('正在等待已授权的微信聊天窗口…')
     await invoke('start_wechat_monitor')
     setMonitoring(true)
@@ -70,6 +80,13 @@ export default function OverlayAssistant() {
     return <div className="assistant-orb" title="拖动外圈移动；点击 e 展开 EchoMate 快捷助手" onMouseDown={startDragging}>
       <button className="assistant-orb-expand" title="展开 EchoMate 快捷助手" onMouseDown={(event) => event.stopPropagation()} onClick={expand}>e</button>
     </div>
+  }
+
+  if (showWechatConsent) {
+    return <main className="overlay-shell overlay-consent">
+      <div className="overlay-consent-copy"><strong>授权前台微信监听</strong><span>仅本次会话读取当前前台、且你有权处理的微信可访问文本；切换窗口即暂停。不读微信数据库，不自动发送给模型。</span></div>
+      <div className="overlay-actions"><button className="overlay-secondary" onClick={dismissWechatConsent}>取消</button><button onClick={startWechatMonitor}>同意并开始</button></div>
+    </main>
   }
 
   return <main className="overlay-shell">
