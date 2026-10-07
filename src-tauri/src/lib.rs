@@ -157,6 +157,13 @@ unsafe fn foreground_process_is_wechat(hwnd: HWND) -> bool {
 }
 
 #[cfg(target_os = "windows")]
+unsafe fn foreground_is_assistant_window(hwnd: HWND) -> bool {
+  let mut process_id = 0u32;
+  unsafe { GetWindowThreadProcessId(hwnd, Some(&mut process_id)); }
+  process_id == std::process::id() && unsafe { foreground_window_title(hwnd) } == "EchoMate 快捷助手"
+}
+
+#[cfg(target_os = "windows")]
 unsafe fn read_visible_uia_text(hwnd: HWND) -> windows::core::Result<Vec<String>> {
   // UI Automation reads accessibility data exposed by the visible app. It
   // cannot access WeChat's stored chat history or private databases.
@@ -185,15 +192,30 @@ fn run_wechat_monitor(app: tauri::AppHandle, active: Arc<AtomicBool>) {
   let mut previous_lines: Vec<String> = Vec::new();
   let mut last_title = String::new();
   let mut baseline_pending = true;
+  let mut wechat_window: Option<HWND> = None;
+  let session_nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|time| time.as_nanos()).unwrap_or_default();
+  let mut appearance = 0u64;
   unsafe { let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED); }
   emit_wechat_status(&app, "probing", "正在等待你切换到前台微信聊天窗口…", None);
   while active.load(Ordering::SeqCst) {
-    let hwnd = unsafe { GetForegroundWindow() };
-    if hwnd.0.is_null() || !unsafe { foreground_process_is_wechat(hwnd) } {
+    let foreground = unsafe { GetForegroundWindow() };
+    let hwnd = if !foreground.0.is_null() && unsafe { foreground_process_is_wechat(foreground) } {
+      wechat_window = Some(foreground);
+      foreground
+    } else if !foreground.0.is_null() && unsafe { foreground_is_assistant_window(foreground) } {
+      match wechat_window.filter(|window| unsafe { foreground_process_is_wechat(*window) }) {
+        Some(window) => window,
+        None => {
+          emit_wechat_status(&app, "paused", "请先将已授权的微信聊天窗口置于前台；之后可使用悬浮助手而不中断监听。", None);
+          thread::sleep(Duration::from_millis(850));
+          continue;
+        }
+      }
+    } else {
       emit_wechat_status(&app, "paused", "监听已暂停：请将已授权的微信聊天窗口置于前台。", None);
       thread::sleep(Duration::from_millis(850));
       continue;
-    }
+    };
     let title = unsafe { foreground_window_title(hwnd) };
     if title.is_empty() {
       emit_wechat_status(&app, "paused", "未识别到当前微信聊天标题，未读取任何内容。", None);
@@ -208,7 +230,7 @@ fn run_wechat_monitor(app: tauri::AppHandle, active: Arc<AtomicBool>) {
     }
     match unsafe { read_visible_uia_text(hwnd) } {
       Ok(lines) if lines.is_empty() => {
-        emit_wechat_status(&app, "fallback_ocr", "微信未暴露可读的无障碍文本；可选择仅本次会话启用本地 OCR。", Some(title));
+        emit_wechat_status(&app, "unavailable", "微信未暴露可读取的无障碍文本；请改用手动粘贴或导入聊天记录。", Some(title));
       }
       Ok(lines) => {
         // The existing screen is a visual snapshot, not a history import.
@@ -227,15 +249,16 @@ fn run_wechat_monitor(app: tauri::AppHandle, active: Arc<AtomicBool>) {
           for line in current {
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            (title.as_str(), line.as_str()).hash(&mut hasher);
+            appearance = appearance.wrapping_add(1);
+            (title.as_str(), line.as_str(), appearance, session_nonce).hash(&mut hasher);
             let source_key = format!("{:016x}", hasher.finish());
             let _ = app.emit("wechat-monitor-message", WechatMessage { chat_title: title.clone(), content: line, role: "received", source_key });
           }
         }
         previous_lines = lines;
-        emit_wechat_status(&app, "monitoring", "正在读取当前前台聊天中新出现的可访问文本。切换窗口即暂停。", Some(title));
+        emit_wechat_status(&app, "monitoring", "正在读取当前微信聊天中新出现的可访问文本；使用悬浮助手不会中断监听。", Some(title));
       }
-      Err(_) => emit_wechat_status(&app, "fallback_ocr", "此微信版本未提供可用无障碍文本；可选择仅本次会话启用本地 OCR。", Some(title)),
+      Err(_) => emit_wechat_status(&app, "unavailable", "此微信版本未提供可读取的无障碍文本；请改用手动粘贴或导入聊天记录。", Some(title)),
     }
     thread::sleep(Duration::from_millis(850));
   }
