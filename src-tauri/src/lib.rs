@@ -10,7 +10,7 @@ use windows::{
       Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION},
     },
     UI::{
-      Accessibility::{CUIAutomation, IUIAutomation, TreeScope_Subtree, UIA_NamePropertyId},
+      Accessibility::{CUIAutomation, IUIAutomation, TreeScope_Subtree, UIA_LegacyIAccessibleValuePropertyId, UIA_NamePropertyId, UIA_ValueValuePropertyId},
       WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId, GetWindowTextLengthW, GetWindowTextW},
     },
   },
@@ -175,13 +175,15 @@ unsafe fn read_visible_uia_text(hwnd: HWND) -> windows::core::Result<Vec<String>
   let mut result = Vec::new();
   for index in 0..count {
     let element = unsafe { elements.GetElement(index) }?;
-    let name = unsafe { element.GetCurrentPropertyValue(UIA_NamePropertyId) }?;
-    let text = name.to_string();
-    let text = text.trim();
-    // Labels such as buttons and navigation entries are generally very short;
-    // excluding them reduces accidental capture while retaining message text.
-    if text.chars().count() >= 2 && text.chars().count() <= 2000 && !result.iter().any(|seen: &String| seen == text) {
-      result.push(text.to_string());
+    for property_id in [UIA_NamePropertyId, UIA_ValueValuePropertyId, UIA_LegacyIAccessibleValuePropertyId] {
+      let Ok(value) = (unsafe { element.GetCurrentPropertyValue(property_id) }) else { continue };
+      let text = value.to_string();
+      let text = text.trim();
+      // Different WeChat builds expose message bubbles through different UIA
+      // properties. Read all three, then keep only meaningful unique values.
+      if text.chars().count() >= 2 && text.chars().count() <= 2000 && !result.iter().any(|seen: &String| seen == text) {
+        result.push(text.to_string());
+      }
     }
   }
   Ok(result)
