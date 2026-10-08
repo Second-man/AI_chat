@@ -181,8 +181,8 @@ function App() {
     const data = new FormData(); data.append('file', file)
     try {
       setBusy(true)
-      const result = await request<{ file_name: string; chunks: number; duplicate: boolean }>('/documents/import', { method: 'POST', body: data })
-      setStatus(result.duplicate ? '该资料已在本地知识库中' : `已将 ${result.file_name} 分为 ${result.chunks} 个本地检索片段`)
+      const result = await request<{ file_name: string; chunks: number; duplicate: boolean; updated: boolean }>('/documents/import', { method: 'POST', body: data })
+      setStatus(result.duplicate ? '该资料已存在，已使用最新分块规则' : result.updated ? `索引已更新：${result.file_name}，共 ${result.chunks} 个片段（280 字符／重叠 60）` : `首次导入：已将 ${result.file_name} 分为 ${result.chunks} 个本地检索片段`)
     } catch (error) { setStatus(error instanceof Error ? error.message : '导入失败') } finally { setBusy(false) }
   }
 

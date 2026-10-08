@@ -48,6 +48,10 @@ CHROMA_DIR = DATA_DIR / "chroma"
 KEYRING_SERVICE = "EchoMate"
 VAULT_FILE = DATA_DIR / "api_key.vault"
 VAULT_SALT_FILE = DATA_DIR / "api_key.vault.salt"
+RAG_CHUNK_SIZE = 280
+RAG_CHUNK_OVERLAP = 60
+RAG_CHUNK_VERSION = "280-60-v1"
+DOCUMENT_LOCK = Lock()
 
 
 def now() -> str:
@@ -168,6 +172,9 @@ def initialize_database() -> None:
         message_columns = {row["name"] for row in connection.execute("PRAGMA table_info(messages)")}
         if "source_key" not in message_columns:
             connection.execute("ALTER TABLE messages ADD COLUMN source_key TEXT")
+        document_columns = {row["name"] for row in connection.execute("PRAGMA table_info(documents)")}
+        if "chunk_version" not in document_columns:
+            connection.execute("ALTER TABLE documents ADD COLUMN chunk_version TEXT NOT NULL DEFAULT 'legacy'")
         connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS messages_contact_source_key "
             "ON messages(contact_id, source_key) WHERE source_key IS NOT NULL"
@@ -661,31 +668,56 @@ async def import_document(file: Annotated[UploadFile, File(...)]):
     if not text:
         raise HTTPException(400, "文件中没有可提取的文本；扫描版 PDF 暂不支持 OCR")
     content_hash = hashlib.sha256(content).hexdigest()
+    with DOCUMENT_LOCK:
+        return index_document(file.filename or "document", content_hash, text)
+
+
+def index_document(file_name: str, content_hash: str, text: str) -> dict:
+    """Stage replacement vectors before removing old ones; preserve old data on failure."""
     with db() as connection:
-        duplicate = connection.execute("SELECT id FROM documents WHERE content_hash=?", (content_hash,)).fetchone()
-        if duplicate:
-            return {"id": duplicate["id"], "duplicate": True}
-    chunks = RecursiveCharacterTextSplitter(chunk_size=700, chunk_overlap=100, separators=["\n\n", "\n", "。", " ", ""]).split_text(text)
-    with db() as connection:
-        cursor = connection.execute("INSERT INTO documents(file_name, content_hash, chunk_count, created_at) VALUES (?, ?, ?, ?)", (file.filename or "document", content_hash, len(chunks), now()))
-        document_id = cursor.lastrowid
-    chunk_ids = [f"doc-{document_id}-{index}" for index in range(len(chunks))]
+        duplicate = connection.execute("SELECT * FROM documents WHERE content_hash=?", (content_hash,)).fetchone()
+        if duplicate and duplicate["chunk_version"] == RAG_CHUNK_VERSION:
+            return {"id": duplicate["id"], "file_name": duplicate["file_name"], "chunks": duplicate["chunk_count"], "duplicate": True, "updated": False}
+    chunks = RecursiveCharacterTextSplitter(chunk_size=RAG_CHUNK_SIZE, chunk_overlap=RAG_CHUNK_OVERLAP, separators=["\n\n", "\n", "。", " ", ""]).split_text(text)
+    if duplicate:
+        document_id = duplicate["id"]
+    else:
+        with db() as connection:
+            cursor = connection.execute("INSERT INTO documents(file_name, content_hash, chunk_count, created_at) VALUES (?, ?, ?, ?)", (file_name, content_hash, len(chunks), now()))
+            document_id = cursor.lastrowid
+    generation = secrets.token_hex(8)
+    chunk_ids = [f"doc-{document_id}-{generation}-{index}" for index in range(len(chunks))]
     store = None
+    old = None
+    removal_started = False
     try:
         store = collection()
-        store.add(ids=chunk_ids, documents=chunks, metadatas=[{"document_id": str(document_id), "file_name": file.filename or "document", "chunk_index": index} for index in range(len(chunks))])
+        if duplicate:
+            old = store.get(where={"document_id": str(document_id)}, include=["documents", "metadatas", "embeddings"])
+        store.add(ids=chunk_ids, documents=chunks, metadatas=[{"document_id": str(document_id), "file_name": file_name, "chunk_index": index, "chunk_version": RAG_CHUNK_VERSION} for index in range(len(chunks))])
+        if old and old["ids"]:
+            removal_started = True
+            store.delete(ids=old["ids"])
+        with db() as connection:
+            connection.execute("UPDATE documents SET file_name=?, chunk_count=?, chunk_version=? WHERE id=?", (file_name, len(chunks), RAG_CHUNK_VERSION, document_id))
     except Exception as error:
         # Do not make a failed vectorization look like a successful import.
         # Best-effort vector cleanup also handles stores that added a subset.
         if store is not None:
+            if removal_started:
+                try:
+                    store.upsert(ids=old["ids"], documents=old["documents"], metadatas=old["metadatas"], embeddings=old["embeddings"])
+                except Exception:
+                    raise HTTPException(503, "索引更新失败，旧索引恢复未完成，请保留原文件并重新导入") from None
             try:
                 store.delete(ids=chunk_ids)
             except Exception:
                 pass
-        with db() as connection:
-            connection.execute("DELETE FROM documents WHERE id=?", (document_id,))
+        if not duplicate:
+            with db() as connection:
+                connection.execute("DELETE FROM documents WHERE id=?", (document_id,))
         raise HTTPException(503, f"本地向量模型初始化失败：{error}") from error
-    return {"id": document_id, "file_name": file.filename, "chunks": len(chunks), "duplicate": False}
+    return {"id": document_id, "file_name": file_name, "chunks": len(chunks), "duplicate": False, "updated": bool(duplicate)}
 
 
 @app.post("/analyze")
@@ -709,11 +741,17 @@ def analyze(payload: AnalyzePayload):
             (payload.contact_id, *batch),
         ))
     recent_messages.sort(key=lambda item: item["id"])
+    current_speaker = "对方" if payload.current_role == "received" else "我"
+    retrieval_history = "\n".join(f"{'对方' if item['role'] == 'received' else '我'}：{item['content']}" for item in recent_messages[-4:]) or "未选择历史消息。"
+    retrieval_query = f"最近聊天：\n{retrieval_history}\n当前消息（{current_speaker}）：{payload.content}\n沟通目标：{payload.goal}"
     citations: list[dict] = []
     try:
-        result = collection().query(query_texts=[payload.content], n_results=4, include=["documents", "metadatas"])
+        with DOCUMENT_LOCK:
+            store = collection()
+            count = store.count()
+            result = store.query(query_texts=[retrieval_query], n_results=min(3, count), include=["documents", "metadatas"]) if count else {}
         for document, metadata in zip(result.get("documents", [[]])[0], result.get("metadatas", [[]])[0]):
-            citations.append({"file_name": metadata.get("file_name", "知识库"), "excerpt": document[:180]})
+            citations.append({"file_name": (metadata or {}).get("file_name", "知识库"), "excerpt": document})
     except Exception:
         pass
     transcript = "\n".join(f"{'对方' if item['role'] == 'received' else '我'}：{item['content']}" for item in recent_messages) or "未选择历史消息。"

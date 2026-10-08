@@ -120,6 +120,7 @@ class WebSearchTests(unittest.TestCase):
                 captured.extend(messages)
                 return type("Response", (), {"content": "这是可能的含义 [W1]，但证据不充分 [W99]。回复：你是说这个梗吗？"})()
         class Collection:
+            def count(self): return 1
             def query(self, **kwargs): return {"documents": [["本地沟通指南"]], "metadatas": [[{"file_name": "指南.txt"}]]}
         with patch.object(self.api, "read_api_key", return_value=("model-key", "test")), patch.object(self.api, "ChatOpenAI", Model), patch.object(self.api, "collection", return_value=Collection()), patch.object(self.api, "fetch_search", new=AsyncMock()) as fetch:
             result = self.api.analyze(self.api.AnalyzePayload(contact_id=contact["id"], content="怎么回这个梗", message_ids=[message["id"]], web_search_id=web["search_id"]))
