@@ -87,7 +87,7 @@ export default function OverlayAssistant() {
     let stop: (() => void) | undefined
     listen<{ contactId: number; messageId: number }>('wechat-message-saved', (event) => {
       if (selected === event.payload.contactId) void loadMessages(selected, false, event.payload.messageId).catch((error) => setStatus(error.message))
-    }).then((unlisten) => { stop = unlisten })
+    }).then((unlisten) => { stop = unlisten }).catch(() => undefined)
     return () => stop?.()
   }, [selected])
   useEffect(() => {
