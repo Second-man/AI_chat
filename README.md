@@ -1,31 +1,40 @@
 # EchoMate
 
-本地优先的 Windows 对话辅助工具：将用户主动粘贴、导入或在一次明确授权后从**当前前台微信窗口**读取的可访问文本保存到本机，结合本地知识库检索，为用户提供可编辑的沟通建议。不读取微信/QQ 数据库，也不会替用户发送消息。
+EchoMate 是一个本地优先的 Windows 对话辅助工具。用户可以主动粘贴、导入聊天记录，或在明确授权后读取当前前台微信窗口公开的无障碍文本，再结合本地知识库生成可编辑的沟通建议。
 
-## Windows 安装
+项目遵循“用户确认后才发送”的原则：不会读取微信或 QQ 私有数据库，不会代替用户发送消息。API Key、联系人、消息、导入资料和分析结果默认保存在本机。
+
+## 当前功能
+
+- 联系人档案、聊天消息和模型建议的本地保存。
+- OpenAI 兼容 API 配置，支持自定义 Base URL 和聊天模型。
+- TXT、Markdown、PDF、DOCX 资料导入、文本分块、向量化和本地 RAG 检索。
+- 微信/QQ 导出文本导入，并识别“我”和“对方”的消息角色。
+- Windows 悬浮助手：可拖动、缩放、收起为常驻桌面悬浮球。
+- 悬浮助手中可查看全部本地聊天消息，并逐条选择发送给模型的上下文。
+- Windows 微信前台监听：仅在用户授权后通过 UI Automation 读取当前窗口暴露的可访问文本。
+
+## 隐私与权限边界
+
+- 微信监听只处理当前前台窗口，不读取微信数据库、聊天文件或隐藏窗口。
+- 切换到其他应用时监听会暂停；悬浮助手处于前台时会继续处理已经确认的微信窗口。
+- 当前微信窗口内容首次只建立基线，不会自动导入旧消息。
+- 新聊天窗口需要用户确认关联到本地联系人后，新增文本才会保存。
+- UI Automation 无法读取时会明确提示；当前版本不会自动截图或启用 OCR。
+- API Key 优先保存到 Windows 凭据管理器，受限环境下使用本机加密保险库，不写入 SQLite。
+- `.echomate/`、本地数据库、密钥文件、构建目录和依赖目录均已加入 Git 忽略规则。
+
+## Windows 使用
 
 使用发行安装程序：
 
-`src-tauri\target\release\bundle\nsis\EchoMate_0.1.0_x64-setup.exe`
+`src-tauri\\target\\release\\bundle\\nsis\\EchoMate_0.1.0_x64-setup.exe`
 
-首次启动后：
-
-1. 点击左下角设置，填写 OpenAI 兼容的 Base URL、聊天模型与 API Key。
-2. Key 优先保存至 Windows 凭据管理器；受限会话中会保存至本机加密保险库，不会写入 SQLite。
-3. 首次导入知识库时，会下载并缓存 `BAAI/bge-small-zh-v1.5`；后续向量化可离线运行。
-
-## 使用方式
-
-- **联系人和消息**：新建联系人，手动粘贴消息，或点击“读取剪贴板”。剪贴板仅在用户点击按钮后读取。
-- **微信/QQ 导出文本**：选择联系人后，在输入区选择“微信导出文本”或“QQ 导出文本”，点击“导入聊天 TXT”。支持 TXT/Markdown；`我：`、`对方：` 前缀会分别保存为双方消息，重复文件不会再次导入。
-- **知识库**：侧边栏的文件按钮支持 TXT、Markdown、PDF、DOCX。资料会在本机提取、分块、向量化和检索。
-- **悬浮助手**：点击顶部“呼出悬浮助手”；可收成常驻桌面的圆形悬浮球。
-- **微信前台监听（Windows）**：在悬浮助手中点击“监听前台微信”，逐次确认授权。程序只在微信是当前前台窗口时通过 Windows UI Automation 读取其暴露的可访问文本；切换到其他应用即暂停。首次窗口内容仅作为基线，不会导入；检测到新的聊天标题时，必须先关联一个本地联系人，之后新出现的文本才会保存。UI Automation 不可读时会提示本地 OCR 兼容性回退，且不会自行截屏或启用 OCR。
-- **远端请求**：只有在“确认并请求建议”后，当前消息、少量该联系人的历史消息和最多 4 条检索片段才会发送给你配置的模型服务。
+首次打开后，在左侧设置中填写 OpenAI 兼容的 Base URL、聊天模型和 API Key。首次导入知识库时，向量模型 `BAAI/bge-small-zh-v1.5` 可能需要下载并缓存。
 
 ## 开发启动
 
-在 CMD 中：
+在 CMD 中执行：
 
 ```cmd
 set "PATH=C:\Users\21766\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\fallback;%PATH%"
@@ -33,11 +42,28 @@ cd /d D:\AI_\chat-companion
 node_modules\.bin\tauri.cmd dev
 ```
 
-## 验证
+启动后应看到本地 API 服务监听：
+
+```text
+Uvicorn running on http://127.0.0.1:8787
+```
+
+## 本地验证
 
 ```cmd
 D:\AI_\.venv\python.exe -m unittest discover -s backend\tests -v
 node_modules\.bin\tauri.cmd build --bundles nsis
 ```
 
-本地自动化测试覆盖加密 Key 兜底、联系人/消息持久化、TXT/DOCX 文本提取与分块、导出聊天记录角色识别和重复导入保护。
+后端测试覆盖本地加密 Key 兜底、联系人和消息持久化、聊天记录导入、文本提取与分块、向量化失败回滚、分析上下文选择、微信映射和同步去重。
+
+## 技术栈
+
+- React、TypeScript、Vite
+- Tauri 2、Rust、Windows UI Automation
+- Python、FastAPI、LangChain
+- SQLite、ChromaDB、Sentence Transformers
+
+## 开源协议
+
+本项目使用 MIT License，详见 [LICENSE](LICENSE)。
