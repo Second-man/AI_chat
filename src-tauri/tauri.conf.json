@@ -31,7 +31,7 @@
         "maxHeight": 820,
         "resizable": true,
         "decorations": false,
-        "transparent": false,
+        "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": false
