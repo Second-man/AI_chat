@@ -99,6 +99,6 @@ mod tests {
   #[test] fn historical_ocr_jitter_does_not_block_stable_new_tail() {
     let mut t = Tracker::default(); stable(&mut t, &["历史", "尾部"]);
     assert_eq!(t.observe(messages(&["历吏", "尾部", "新消息"])), messages(&["新消息"]));
-    assert_eq!(t.observe(messages(&["历史", "尾部", "新消息"])),messages(&["新消息"]));
+    assert!(t.observe(messages(&["历史", "尾部", "新消息"])).is_empty());
   }
 }
