@@ -44,9 +44,10 @@ impl Snapshot {
     let scale = (header.height / 18.0).clamp(0.8, 2.5);
     let left = header.x - 28.0 * scale;
     let top = header.y + header.height + 20.0 * scale;
-    // Keep the composer and draft area out of the chat region. The exact
-    // height varies by WeChat build, so leave a generous bottom safety band.
-    let bottom = self.height as f64 - 230.0 * scale;
+    // Keep the composer and draft area out of the chat region. This is a
+    // window-pixel margin, not an OCR-font margin: multiplying it by the
+    // glyph scale incorrectly dropped the newest bubble on large windows.
+    let bottom = self.height as f64 - 150.0;
     let mut lines: Vec<_> = self.lines.iter().filter(|line| {
       line.x >= left && line.x + line.width <= self.width as f64 && line.y >= top && line.y + line.height < bottom
         && !is_timestamp(&line.text, !line.sent && ((line.x + line.width/2.0) - (left + self.width as f64)/2.0).abs() < 90.0 * scale)
@@ -62,7 +63,7 @@ impl Snapshot {
       // bubble color (themes and capture surfaces can alter colors).
       let role = if line.x + line.width / 2.0 >= (left + self.width as f64) / 2.0 { "sent" } else { "received" };
       if let Some(last) = messages.last_mut() {
-        if last.role == role && line.y - last_bottom < line.height * 0.65
+        if last.role == role && line.y - last_bottom >= -2.0 && line.y - last_bottom < line.height * 0.45
           && (line.x-last_x).abs() < 35.0 * scale {
           last.content.push('\n'); last.content.push_str(content);
           last_bottom = line.y + line.height; last_x = line.x;
@@ -243,6 +244,16 @@ mod tests {
     assert!(is_composer_text("按住鼠标语音输入文字"));
     assert!(is_composer_text("发送"));
     assert!(!is_composer_text("今天几点见？"));
+  }
+  #[test] fn chat_bottom_margin_keeps_latest_bubble_above_composer() {
+    let snapshot = Snapshot { width: 1920, height: 1200, lines: vec![
+      OcrLine { text: "聊天".into(), x: 300.0, y: 65.0, width: 36.0, height: 20.0, sent: false },
+      OcrLine { text: "3344".into(), x: 1760.0, y: 840.0, width: 50.0, height: 20.0, sent: true },
+      OcrLine { text: "4".into(), x: 1780.0, y: 910.0, width: 15.0, height: 20.0, sent: true },
+      OcrLine { text: "按住鼠标语音输入文字".into(), x: 305.0, y: 1080.0, width: 180.0, height: 20.0, sent: false },
+    ]};
+    let chat = snapshot.chat().unwrap();
+    assert_eq!(chat.messages.iter().map(|m| m.content.as_str()).collect::<Vec<_>>(), vec!["3344", "4"]);
   }
   #[test] fn chinese_spacing_preserves_english() {
     assert_eq!(normalize_ocr_text("什 么 东 西"),"什么东西");
