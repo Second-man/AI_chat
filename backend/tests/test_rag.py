@@ -50,7 +50,7 @@ class Vectors:
     def query(self, **kwargs):
         self.request = kwargs
         values = list(self.items.values())[:kwargs["n_results"]]
-        return {"documents": [[item[0] for item in values]], "metadatas": [[item[1] for item in values]]}
+        return {"documents": [[item[0] for item in values]], "metadatas": [[item[1] for item in values]], "distances": [[0.2 for item in values]]}
 
 
 class RagTests(unittest.TestCase):
@@ -146,7 +146,7 @@ class RagTests(unittest.TestCase):
         self.store.add([str(i) for i in range(5)], excerpts, [{"file_name": "指南"} for _ in range(5)])
         result, prompt = self.run_analysis(self.api.AnalyzePayload(contact_id=contact["id"], content="当前内容", current_role="sent", goal="温和拒绝", message_ids=list(reversed(ids)) + [foreign["id"], ids[0]]))
         query = self.store.request["query_texts"][0]
-        self.assertEqual(self.store.request["n_results"], 3)
+        self.assertEqual(self.store.request["n_results"], 5)
         self.assertNotIn("选中历史0", query)
         self.assertNotIn("选中历史1", query)
         self.assertIn("对方：选中历史2", query)
@@ -186,6 +186,50 @@ class RagTests(unittest.TestCase):
             row = self.api.rows("SELECT * FROM documents")[0]
             self.assertEqual(row["chunk_version"], "legacy")
             self.assertEqual(row["chunk_count"], 4)
+
+    def test_threshold_filters_and_distinguishes_errors(self):
+        contact = self.api.create_contact(self.api.ContactPayload(name="测试"))
+        payload = self.api.AnalyzePayload(contact_id=contact["id"], content="测试")
+        self.store.add(["a", "b"], ["相关资料", "无关资料"], [{"file_name": "指南"}] * 2)
+        result_data = {"documents": [["相关资料", "无关资料"]], "metadatas": [[{"file_name": "指南"}] * 2], "distances": [[0.5, 0.8]]}
+        with patch.object(self.store, "query", return_value=result_data):
+            result, prompt = self.run_analysis(payload)
+            self.assertEqual(len(result["citations"]), 1)
+            self.assertEqual(result["citations"][0]["similarity"], 0.5)
+            self.assertNotIn("无关资料", prompt)
+            with self.api.db() as connection:
+                connection.execute("UPDATE settings SET rag_min_similarity=0.9")
+            result, _ = self.run_analysis(payload)
+            self.assertEqual(result["retrieval_status"], "no_match")
+            self.assertEqual(result["citations"], [])
+        with patch.object(self.store, "query", side_effect=RuntimeError()):
+            result, _ = self.run_analysis(payload)
+            self.assertEqual(result["retrieval_status"], "error")
+
+    def test_threshold_validation(self):
+        from pydantic import ValidationError
+        for value in (-1.1, 1.1, float("nan")):
+            with self.assertRaises(ValidationError):
+                self.api.SettingsPayload(rag_min_similarity=value)
+
+    def test_real_chroma_legacy_migration_preserves_vectors(self):
+        import chromadb
+        client = chromadb.EphemeralClient()
+        # Unique name isolation is handled by deleting only this test's collections.
+        for name in ("knowledge", "knowledge_cosine_v1"):
+            if name in [item.name for item in client.list_collections()]: client.delete_collection(name)
+        legacy = client.create_collection("knowledge", embedding_function=None)
+        legacy.add(ids=["old"], documents=["原始参考资料"], metadatas=[{"document_id": "1"}], embeddings=[[1.0, 0.0]])
+        with patch.object(self.api.chromadb, "PersistentClient", return_value=client), patch.object(self.api, "SentenceTransformerEmbeddingFunction", return_value=None):
+            migrated = self.vector_patch.temp_original()
+            self.assertEqual(migrated.configuration["hnsw"]["space"], "cosine")
+            self.assertEqual(migrated.get()["documents"], ["原始参考资料"])
+            score = migrated.query(query_embeddings=[[1.0, 0.0]], n_results=1, include=["distances"])["distances"][0][0]
+            self.assertAlmostEqual(1 - score, 1)
+            self.assertEqual(legacy.count(), 1)
+            self.assertEqual(self.vector_patch.temp_original().count(), 1)
+        client.delete_collection("knowledge_cosine_v1")
+        client.delete_collection("knowledge")
 
 
 if __name__ == "__main__": unittest.main()
