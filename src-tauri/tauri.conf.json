@@ -31,8 +31,7 @@
         "maxHeight": 820,
         "resizable": true,
         "decorations": false,
-        "transparent": true,
-        "backgroundColor": "#00000000",
+        "transparent": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": false
