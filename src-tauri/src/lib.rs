@@ -2,15 +2,19 @@ use std::{env, fs, path::PathBuf, process::{Child, Command}, sync::{Arc, Mutex, 
 use tauri::{Emitter, Manager};
 
 #[cfg(target_os = "windows")]
+mod wechat_ocr;
+mod wechat_tracker;
+
+#[cfg(target_os = "windows")]
 use windows::{
   Win32::{
     Foundation::HWND,
     System::{
-      Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED},
+      Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED},
       Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION},
     },
     UI::{
-      Accessibility::{CUIAutomation, IUIAutomation, TreeScope_Subtree, UIA_LegacyIAccessibleValuePropertyId, UIA_NamePropertyId, UIA_ValueValuePropertyId},
+      Accessibility::{CUIAutomation, IUIAutomation, IUIAutomationTextPattern, TreeScope_Subtree, UIA_LegacyIAccessibleValuePropertyId, UIA_NamePropertyId, UIA_TextPatternId, UIA_ValueValuePropertyId},
       WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId, GetWindowTextLengthW, GetWindowTextW},
     },
   },
@@ -26,13 +30,13 @@ struct AssistantWindowState(Mutex<Option<tauri::PhysicalSize<u32>>>);
 /// The monitor is opt-in and ephemeral. It never searches hidden windows or
 /// chat databases: it polls only the *currently foreground* WeChat window.
 struct WechatMonitor {
-  active: Arc<AtomicBool>,
+  active: Mutex<Option<Arc<AtomicBool>>>,
   contact_id: Mutex<Option<i64>>,
 }
 
 impl Default for WechatMonitor {
   fn default() -> Self {
-    Self { active: Arc::new(AtomicBool::new(false)), contact_id: Mutex::new(None) }
+    Self { active: Mutex::new(None), contact_id: Mutex::new(None) }
   }
 }
 
@@ -164,6 +168,7 @@ unsafe fn foreground_is_assistant_window(hwnd: HWND) -> bool {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)] // Diagnostic only until a chat-bubble UIA adapter is validated.
 unsafe fn read_visible_uia_text(hwnd: HWND) -> windows::core::Result<Vec<String>> {
   // UI Automation reads accessibility data exposed by the visible app. It
   // cannot access WeChat's stored chat history or private databases.
@@ -173,17 +178,28 @@ unsafe fn read_visible_uia_text(hwnd: HWND) -> windows::core::Result<Vec<String>
   let elements = unsafe { root.FindAll(TreeScope_Subtree, &condition) }?;
   let count = unsafe { elements.Length() }?;
   let mut result = Vec::new();
-  for index in 0..count {
-    let element = unsafe { elements.GetElement(index) }?;
-    for property_id in [UIA_NamePropertyId, UIA_ValueValuePropertyId, UIA_LegacyIAccessibleValuePropertyId] {
-      let Ok(value) = (unsafe { element.GetCurrentPropertyValue(property_id) }) else { continue };
-      let text = value.to_string();
-      let text = text.trim();
-      // Different WeChat builds expose message bubbles through different UIA
-      // properties. Read all three, then keep only meaningful unique values.
+  let mut append_text = |raw: &str| {
+    for line in raw.lines() {
+      let text = line.trim();
       if text.chars().count() >= 2 && text.chars().count() <= 2000 && !result.iter().any(|seen: &String| seen == text) {
         result.push(text.to_string());
       }
+    }
+  };
+  for index in 0..count {
+    let element = unsafe { elements.GetElement(index) }?;
+    if let Ok(pattern) = unsafe { element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) } {
+      if let Ok(range) = unsafe { pattern.DocumentRange() } {
+        if let Ok(value) = unsafe { range.GetText(2000) } {
+          append_text(&value.to_string());
+        }
+      }
+    }
+    for property_id in [UIA_NamePropertyId, UIA_ValueValuePropertyId, UIA_LegacyIAccessibleValuePropertyId] {
+      let Ok(value) = (unsafe { element.GetCurrentPropertyValue(property_id) }) else { continue };
+      // Different WeChat builds expose message bubbles through different UIA
+      // properties. Read all three, then keep only meaningful unique values.
+      append_text(&value.to_string());
     }
   }
   Ok(result)
@@ -191,13 +207,18 @@ unsafe fn read_visible_uia_text(hwnd: HWND) -> windows::core::Result<Vec<String>
 
 #[cfg(target_os = "windows")]
 fn run_wechat_monitor(app: tauri::AppHandle, active: Arc<AtomicBool>) {
-  let mut previous_lines: Vec<String> = Vec::new();
+  let mut tracker = wechat_tracker::Tracker::default();
   let mut last_title = String::new();
-  let mut baseline_pending = true;
+  let mut candidate_title = String::new();
   let mut wechat_window: Option<HWND> = None;
   let session_nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|time| time.as_nanos()).unwrap_or_default();
   let mut appearance = 0u64;
-  unsafe { let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED); }
+  if let Err(error) = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).ok() } {
+    active.store(false, Ordering::SeqCst);
+    emit_wechat_status(&app, "stopped", format!("监听线程初始化失败：{error}"), None);
+    return;
+  }
+  let ocr = wechat_ocr::engine();
   emit_wechat_status(&app, "probing", "正在等待你切换到前台微信聊天窗口…", None);
   while active.load(Ordering::SeqCst) {
     let foreground = unsafe { GetForegroundWindow() };
@@ -218,54 +239,56 @@ fn run_wechat_monitor(app: tauri::AppHandle, active: Arc<AtomicBool>) {
       thread::sleep(Duration::from_millis(850));
       continue;
     };
-    let title = unsafe { foreground_window_title(hwnd) };
-    if title.is_empty() {
-      emit_wechat_status(&app, "paused", "未识别到当前微信聊天标题，未读取任何内容。", None);
-      thread::sleep(Duration::from_millis(850));
-      continue;
+    let (title, lines, method) = match ocr.as_ref().map_err(|e| e.to_string())
+      .and_then(|engine| wechat_ocr::read_window(hwnd, engine).map_err(|e| e.to_string())) {
+      Ok(snapshot) => match snapshot.chat() {
+        Some(chat) => (chat.title, chat.messages, "本地 OCR"),
+        None => {
+          emit_wechat_status(&app, "unavailable", "未定位到微信聊天区域，请打开一个聊天并保持标题与消息区域可见。", None);
+          thread::sleep(Duration::from_millis(850)); continue;
+        }
+      },
+      Err(error) => {
+        // Whole-tree UIA values include menus/tooltips and cannot safely be
+        // treated as chat bubbles without a validated structural adapter.
+        emit_wechat_status(&app, "unavailable", format!("未读取或保存消息。本地 OCR：{error}。请检查简体中文 OCR 组件和微信窗口状态。"), None);
+        thread::sleep(Duration::from_millis(850)); continue;
+      },
+    };
+    // Capture/OCR can take time: recheck foreground before processing results.
+    let now = unsafe { GetForegroundWindow() };
+    if !active.load(Ordering::SeqCst) || (now != hwnd && !unsafe { foreground_is_assistant_window(now) }) {
+      thread::sleep(Duration::from_millis(850)); continue;
+    }
+    if title != candidate_title {
+      candidate_title = title;
+      emit_wechat_status(&app, "probing", "正在确认当前聊天标题与画面…", None);
+      thread::sleep(Duration::from_millis(850)); continue;
     }
     if title != last_title {
-      previous_lines.clear();
-      baseline_pending = true;
+      tracker.reset();
       last_title = title.clone();
       emit_wechat_status(&app, "mapping", "检测到微信聊天，请确认要保存到哪个本地联系人。", Some(title.clone()));
     }
-    match unsafe { read_visible_uia_text(hwnd) } {
-      Ok(lines) if lines.is_empty() => {
-        emit_wechat_status(&app, "unavailable", "微信未暴露可读取的无障碍文本；请改用手动粘贴或导入聊天记录。", Some(title));
-      }
-      Ok(lines) => {
-        // The existing screen is a visual snapshot, not a history import.
-        // Starting from a baseline makes this feature capture only messages
-        // that appear after the user explicitly starts listening (or changes
-        // the selected WeChat conversation).
-        if baseline_pending {
-          previous_lines = lines;
-          baseline_pending = false;
-          emit_wechat_status(&app, "monitoring", "已建立当前可见内容基线；现在只保存之后新出现的可访问文本。", Some(title));
-          thread::sleep(Duration::from_millis(850));
-          continue;
-        }
-        let current = lines.iter().filter(|line| !previous_lines.contains(line)).cloned().collect::<Vec<_>>();
-        if !current.is_empty() {
-          for line in current {
+    if active.load(Ordering::SeqCst) {
+          for line in tracker.observe(lines) {
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             appearance = appearance.wrapping_add(1);
-            (title.as_str(), line.as_str(), appearance, session_nonce).hash(&mut hasher);
+            (title.as_str(), line.content.as_str(), appearance, session_nonce).hash(&mut hasher);
             let source_key = format!("{:016x}", hasher.finish());
-            let _ = app.emit("wechat-monitor-message", WechatMessage { chat_title: title.clone(), content: line, role: "received", source_key });
+            let _ = app.emit("wechat-monitor-message", WechatMessage { chat_title: title.clone(), content: line.content, role: line.role, source_key });
           }
-        }
-        previous_lines = lines;
-        emit_wechat_status(&app, "monitoring", "正在读取当前微信聊天中新出现的可访问文本；使用悬浮助手不会中断监听。", Some(title));
-      }
-      Err(_) => emit_wechat_status(&app, "unavailable", "此微信版本未提供可读取的无障碍文本；请改用手动粘贴或导入聊天记录。", Some(title)),
+        emit_wechat_status(&app, "monitoring", format!("正在通过{method}监测“{title}”；检测到新增文本立即同步，左侧为对方、右侧为我，首次画面不导入。"), Some(title));
     }
     thread::sleep(Duration::from_millis(850));
   }
   unsafe { CoUninitialize(); }
-  emit_wechat_status(&app, "stopped", "微信前台监听已停止。", None);
+  // An old worker exiting must not overwrite a newly started session's state.
+  let new_session_running = app.state::<WechatMonitor>().active.lock().ok()
+    .and_then(|session| session.as_ref().map(|token| !Arc::ptr_eq(token, &active) && token.load(Ordering::SeqCst)))
+    .unwrap_or(false);
+  if !new_session_running { emit_wechat_status(&app, "stopped", "微信前台监听已停止。", None); }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -374,10 +397,10 @@ fn toggle_assistant(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn start_wechat_monitor(app: tauri::AppHandle) -> Result<(), String> {
   let monitor = app.state::<WechatMonitor>();
-  if monitor.active.swap(true, Ordering::SeqCst) {
-    return Ok(());
-  }
-  let active = Arc::clone(&monitor.active);
+  let mut session = monitor.active.lock().map_err(|error| error.to_string())?;
+  if session.as_ref().is_some_and(|active| active.load(Ordering::SeqCst)) { return Ok(()); }
+  let active = Arc::new(AtomicBool::new(true));
+  *session = Some(Arc::clone(&active));
   let handle = app.clone();
   thread::spawn(move || run_wechat_monitor(handle, active));
   Ok(())
@@ -385,7 +408,9 @@ fn start_wechat_monitor(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn stop_wechat_monitor(app: tauri::AppHandle) {
-  app.state::<WechatMonitor>().active.store(false, Ordering::SeqCst);
+  if let Ok(mut session) = app.state::<WechatMonitor>().active.lock() {
+    if let Some(active) = session.take() { active.store(false, Ordering::SeqCst); }
+  }
 }
 
 #[tauri::command]
