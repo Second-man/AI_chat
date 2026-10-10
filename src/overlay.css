@@ -26,7 +26,11 @@ button, select, textarea { font:inherit; }
 .overlay-status { flex:0 0 auto; margin:0; min-height:16px; color:#9bb5ad; font-size:11px; overflow:hidden; display:flex; flex-direction:column; gap:4px; }
 .overlay-status > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .overlay-status > button { white-space:normal; align-self:flex-start; }
-.overlay-thread { flex:1 1 auto; width:100%; height:auto; min-height:64px; max-height:none; box-sizing:border-box; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; display:flex; flex-direction:column; gap:7px; padding:8px; border-top:1px solid #2d4654; border-bottom:1px solid #2d4654; scrollbar-color:#6e918a #132734; }
+.overlay-thread { flex:1 1 auto; width:100%; height:auto; min-height:64px; max-height:none; box-sizing:border-box; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; display:flex; flex-direction:column; gap:7px; padding:8px; border-top:1px solid #2d4654; border-bottom:1px solid #2d4654; scrollbar-color:#6e918a #132734; scrollbar-width:thin; }
+.overlay-thread::-webkit-scrollbar, .overlay-answer::-webkit-scrollbar { width:7px; }
+.overlay-thread::-webkit-scrollbar-track, .overlay-answer::-webkit-scrollbar-track { background:#132734; border-radius:99px; }
+.overlay-thread::-webkit-scrollbar-thumb, .overlay-answer::-webkit-scrollbar-thumb { background:#6e918a; border:2px solid #132734; border-radius:99px; }
+.overlay-thread::-webkit-scrollbar-thumb:hover, .overlay-answer::-webkit-scrollbar-thumb:hover { background:#91d4c1; }
 .overlay-message { width:82%; max-width:82%; box-sizing:border-box; flex:none; padding:7px 9px; border-radius:10px 10px 10px 3px; background:#203647; }
 .overlay-message.context-selected { outline:1px solid #71b7a4; }
 .overlay-message.sent { align-self:flex-end; border-radius:10px 10px 3px 10px; background:#6fbba8; color:#112e28; }
@@ -47,7 +51,10 @@ button, select, textarea { font:inherit; }
 .overlay-history-item small { color:#9fc2b7; }
 .overlay-history-item b, .overlay-history-item span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .overlay-history-item span { color:#bfdbd2; font-size:11px; }
-.overlay-composer { width:100%; height:52px; min-height:52px; resize:none; box-sizing:border-box; border:1px solid #486174; border-radius:10px; background:#0d1b27; color:#eaf5f1; padding:8px 9px; outline:none; }
+.overlay-composer { display:block; width:100%; min-width:0; height:58px; min-height:58px; resize:vertical; box-sizing:border-box; border:1px solid #486174; border-radius:10px; background:#0d1b27; color:#eaf5f1; padding:8px 9px; outline:none; scrollbar-color:#6e918a #0d1b27; scrollbar-width:thin; }
+.overlay-composer::-webkit-scrollbar { width:7px; }
+.overlay-composer::-webkit-scrollbar-track { background:#0d1b27; border-radius:99px; }
+.overlay-composer::-webkit-scrollbar-thumb { background:#6e918a; border:2px solid #0d1b27; border-radius:99px; }
 .overlay-composer:focus { border-color:#8dd2bd; }
 .overlay-footer { flex:0 0 auto; justify-content:space-between; flex-wrap:wrap; }
 .overlay-footer > div:last-child { margin-left:auto; }
@@ -68,11 +75,13 @@ button, select, textarea { font:inherit; }
 @media (max-width:400px), (max-height:380px) { .overlay-workbench { gap:6px; padding:9px; } .overlay-composer { height:48px; min-height:48px; } .overlay-thread { padding:5px; } }
 .overlay-preview { padding:16px; overflow-y:auto; }
 .overlay-preview blockquote { margin:8px 0; white-space:pre-wrap; overflow-wrap:anywhere; background:#203647; padding:8px; }
-.overlay-input-area { flex:0 0 auto; min-width:0; }
+.overlay-input-area { flex:0 0 auto; align-self:stretch; width:100%; min-width:0; }
+.overlay-input-area textarea { display:block; width:100%; max-width:none; }
 .web-search-options { display:grid; gap:5px; margin:5px 0; }
 .web-search-options input[type=checkbox] { width:auto; }
 .web-search-options input:not([type=checkbox]) { width:100%; box-sizing:border-box; background:#162938; color:#eaf5f1; border:1px solid #486174; border-radius:7px; padding:5px; }
 .web-search-options small { color:#9bb5ad; font-size:10px; }
+.web-search-options { width:100%; }
 .web-sources { overflow-wrap:anywhere; font-size:11px; }
 .web-sources a { color:#a1dfca; }
 .web-sources small,.web-sources span { display:block; }
